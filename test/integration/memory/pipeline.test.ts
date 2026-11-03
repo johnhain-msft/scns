@@ -4,7 +4,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { mkdtempSync, rmSync, utimesSync } from 'node:fs'
+import { mkdtempSync, rmSync, statSync, utimesSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { openMemoryDb, closeMemoryDb } from '../../../src/memory/db.js'
@@ -89,6 +89,25 @@ describe('Memory pipeline integration', () => {
     const results = keywordOnlySearch(db, 'Express')
     expect(results.length).toBeGreaterThan(0)
     // Should find the updated version
+    expect(results[0]!.content).toContain('Express 5')
+  })
+
+  it('re-indexes an update that lands in the same mtime granule (#52)', () => {
+    vault.write('MEMORY.md', 'The project uses Express 4 for the HTTP server.')
+    const filePath = join(rootDir, 'MEMORY.md')
+    const firstMtime = statSync(filePath).mtime
+    indexVaultSync(db, vault)
+
+    // The race from #52: a second write whose mtime equals the one already
+    // indexed (same-length content, same filesystem timestamp granule).
+    // Reproduce it exactly by pinning the updated file's mtime to the first
+    // write's mtime — the mtime shortlist alone would never see this update.
+    vault.write('MEMORY.md', 'The project uses Express 5 for the HTTP server.')
+    utimesSync(filePath, firstMtime, firstMtime)
+    indexVaultSync(db, vault)
+
+    const results = keywordOnlySearch(db, 'Express')
+    expect(results.length).toBeGreaterThan(0)
     expect(results[0]!.content).toContain('Express 5')
   })
 

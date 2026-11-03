@@ -279,6 +279,31 @@ function hashContent(content: string): string {
 }
 
 /**
+ * How close (ms) a file's mtime may sit to the index pass before it counts as
+ * "racy": a write could still land in the same filesystem timestamp granule
+ * and produce an identical mtime. Covers coarse filesystems (FAT: 2s).
+ */
+const RACY_MTIME_WINDOW_MS = 2000
+
+/**
+ * The mtime value to PERSIST for a file row — git's "racy clean" guard (#52).
+ *
+ * Change detection shortlists files by stored-vs-current mtime and only then
+ * content-hashes the shortlist. A write landing in the same mtime granule as
+ * the content we just indexed produces an identical mtime, so it would never
+ * be shortlisted again and the index would stay stale for that file forever.
+ * For a file whose mtime falls within one granule of this pass, persist a
+ * smudged (decremented) mtime instead: the next pass sees a mismatch and the
+ * cheap content-hash gate settles whether anything actually changed — after
+ * which the true mtime (now safely in the past) is persisted and the extra
+ * hash stops.
+ */
+function persistedMtimeMs(fileMtimeMs: number, passStartMs: number): number {
+  const floored = Math.floor(fileMtimeMs)
+  return floored >= Math.floor(passStartMs) - RACY_MTIME_WINDOW_MS ? floored - 1 : floored
+}
+
+/**
  * Drop files whose CURRENT revision was explicitly retired and not restored.
  *
  * Without this, an index pass that started before a deletion (or a scheduled reconciler racing
@@ -320,6 +345,7 @@ export async function indexVault(
   excludePrefixes: readonly string[] = DEFAULT_INDEX_EXCLUDE_PREFIXES,
   entityOptions: EntityIndexOptions = {},
 ): Promise<IndexStats> {
+  const passStartMs = Date.now()
   const stats = {
     filesScanned: 0,
     filesIndexed: 0,
@@ -406,7 +432,7 @@ export async function indexVault(
         stats.filesRemoved++
       }
       for (const touch of mtimeOnlyUpdates) {
-        touchMtime.run(Math.floor(touch.mtimeMs), touch.sizeBytes, touch.path)
+        touchMtime.run(persistedMtimeMs(touch.mtimeMs, passStartMs), touch.sizeBytes, touch.path)
       }
     })()
     maybeRebuildEntityEdges(db, entityOptions, true)
@@ -537,14 +563,14 @@ export async function indexVault(
     }
 
     for (const touch of mtimeOnlyUpdates) {
-      touchMtime.run(Math.floor(touch.mtimeMs), touch.sizeBytes, touch.path)
+      touchMtime.run(persistedMtimeMs(touch.mtimeMs, passStartMs), touch.sizeBytes, touch.path)
     }
 
     for (const file of changedFiles) {
       deleteEmbeddings.run(file.path)
       deleteChunks.run(file.path)
       const hash = hashContent(file.content)
-      upsertFile.run(file.path, Math.floor(file.mtimeMs), file.sizeBytes, hash)
+      upsertFile.run(file.path, persistedMtimeMs(file.mtimeMs, passStartMs), file.sizeBytes, hash)
     }
 
     for (let i = 0; i < chunkMeta.length; i++) {
@@ -919,6 +945,7 @@ export function indexVaultSync(
   IndexStats,
   'embeddingsGenerated' | 'embeddingsPruned' | 'factsExtracted' | 'factBatchesRun'
 > {
+  const passStartMs = Date.now()
   const stats = {
     filesScanned: 0,
     filesIndexed: 0,
@@ -1005,14 +1032,14 @@ export function indexVaultSync(
     }
 
     for (const touch of mtimeOnlyUpdates) {
-      touchMtime.run(Math.floor(touch.mtimeMs), touch.sizeBytes, touch.path)
+      touchMtime.run(persistedMtimeMs(touch.mtimeMs, passStartMs), touch.sizeBytes, touch.path)
     }
 
     for (const file of changedFiles) {
       deleteEmbeddings.run(file.path)
       deleteChunks.run(file.path)
       const hash = hashContent(file.content)
-      upsertFile.run(file.path, Math.floor(file.mtimeMs), file.sizeBytes, hash)
+      upsertFile.run(file.path, persistedMtimeMs(file.mtimeMs, passStartMs), file.sizeBytes, hash)
 
       const chunks = chunkText(file.content, chunkConfig)
       for (const chunk of chunks) {
