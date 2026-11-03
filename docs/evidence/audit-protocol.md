@@ -37,9 +37,11 @@ focus and leave the guard invariants without their own gradeable artifact. Nothi
 | T012 | trustworthy_recall | answer quality + tokens | `src/memory/*` (adaptive-traversal, intent-search, retrieval-context, indexer, causal-*) | `audit/trustworthy_recall.md` |
 | T013 | self_learning | accept-vs-waste loop | `src/reward/*`, `src/suggest/*`, `src/ideate/*`, `src/brain/*`, `experience-store.ts`, `arm-router.ts`, `human-outcome.ts` | `audit/self_learning.md` |
 | T014 | self_direction | decide/schedule/go | `src/autonomy/*` (thin, 1 file), `src/selfopt/*`, `src/observe/*`, `src/meta-broker/*` | `audit/self_direction.md` |
-| T015 | voice_cloning | persona→skill+agent | no dedicated subsystem (`ideate/`, `core-file-generator.ts`, skills) | `audit/voice_cloning.md` |
 | T016 | safe_outward | guardrails | `src/broker/services/outward/*`, `config/safety-allowlist.json`, kernel | `audit/safe_outward.md` |
 | T011b | **guards (cross-cutting)** | RunGuards §6 | vault RO / kernel+allowlist untouched / broker :3456 / isolated home / PID-kill / levers default-OFF | `audit/guards.md` |
+
+> **2026-11 note:** a fifth capability auditor (T015) was part of the original protocol; that capability was
+> retired from the roadmap and its row and audit file were removed from these records.
 
 ## Grading rubric (per capability — data-model §1)
 

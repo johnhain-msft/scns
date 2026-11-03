@@ -19,7 +19,6 @@ honest correction (below).
 | trustworthy_recall | `built` | "Is the faithful magma path actually the live default?" | `SCNS_INTENT_ROUTING === '1'` + `SCNS_TRAVERSE_ROUTING === '1'` gates (`src/cli.ts:919-951`) ⇒ default hybrid; only archived live evidence is a measured NULL (`us1-cert-run…log:45-53`). | **Upheld** — not usable; US2 unmeasured. |
 | self_learning | `built` | "Is the accept-vs-waste loop closed live?" | `settleHumanOutcomeForAttempt` → **def (`human-outcome.ts:86`) + barrel (`index.ts:133`) only, 0 callers**; `recordAttempt` → **0 matches in src/**. | **Upheld** — negative control CONFIRMED. |
 | self_direction | `built` + BLOCKED | "Is there any new-app self-direction or machine scheduler?" | `ls src/autonomy` → **1 file (index.ts)**; seeds gated on `SCNS_REPO_RE`; scheduling is context-threshold rotation only. | **Upheld** — largest gap; BLOCKED valid. |
-| voice_cloning | `specified` + BLOCKED | "Any texts ingestion or persona-contact model?" | `grep imessage\|sms` → **0**; `grep 'approved contact\|persona contact'` → **0**. | **Upheld** — essentially unbuilt. |
 | safe_outward | `measured_with_controls` | "Pre-registered as the `usable` POSITIVE control — why not usable?" | Wired live (`startup.ts:313-315`) + pos/neg controls (`consult-source.test.ts:37-87`), BUT **no archived live e2e row**; a live broker probe is deferred (safety guard: broker :3456 untouched). | **Upheld with correction** (see below). |
 | guards (x-cutting) | `measured_with_controls` | "Are all six invariants negatively controlled?" | Guards 1–3 (vault/PID/home) have executed negative controls; guards 4–6 (broker/allowlist/levers) are structural/pos-only this session. | **Upheld** — honest partial. |
 
@@ -40,7 +39,7 @@ untouched MVP deliberately does not run.
 
 ## Blocked-classification review (Validity-of-Null)
 
-- `self_direction`, `voice_cloning` → **BLOCKED** (`could_setup_show_win:false`): correct — no mechanism
+- `self_direction` → **BLOCKED** (`could_setup_show_win:false`): correct — no mechanism
   exists to probe, so no setup could show the effect.
 - `trustworthy_recall`, `self_learning` → **not blocked** (`blocked:null`): correct — these are fixable/
   measurable (US2 fix; live loop wiring), not structurally can't-win. Distinguishing these from the BLOCKED

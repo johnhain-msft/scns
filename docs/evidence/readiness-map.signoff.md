@@ -45,10 +45,13 @@ graded adversarially (skeptic-first). My conclusion **agrees** with the producer
 ## Grade against the spec (not the producer's summary)
 
 ### SC-001 — coverage (100% of capabilities, each with a state + named gap) — **PASS**
-All five `capability_id`s present exactly once with a valid `state` and a non-empty `gap`
+All `capability_id`s present exactly once with a valid `state` and a non-empty `gap`
 (validator Rule 1 + per-capability checks, 0 violations): `trustworthy_recall`=`built`,
-`self_learning`=`built`, `self_direction`=`built`(+BLOCKED), `voice_cloning`=`specified`(+BLOCKED),
+`self_learning`=`built`, `self_direction`=`built`(+BLOCKED),
 `safe_outward`=`measured_with_controls`.
+
+> **2026-11 note:** a fifth, since-retired capability was part of the original signed-off set; its rows
+> were removed from this record when it was dropped from the roadmap.
 
 ### SC-002 — no unproven `usable` (0 usable without live e2e + pos/neg controls) — **PASS**
 **Zero** capabilities graded `usable`, so the SC-002 over-claim bar is met by construction. The single
@@ -62,7 +65,7 @@ producer (`496bc1fe-dev-worker`) ≠ grader (`06c710b0-…`); this is a dedicate
 
 ### SC-012 — prioritized gap map + honest distance + `magma_placement`, consistent with auditors — **PASS**
 `prioritized_gap_map` has 5 ordered, unique-priority entries; `magma_placement` = Priority 1;
-`distance_summary` opens "SCNS is NOT yet usable … on ANY of the five capabilities" (honest, not inflated —
+`distance_summary` opens "SCNS is NOT yet usable … on ANY of the four capabilities" (honest, not inflated —
 validator Rule 6 clean). Every per-capability state in the map matches its auditor file
 (`audit/*.md` state lines) and the adversarial re-verification table
 (`audit/adversarial-verification.md:19-24`, all "Upheld").
@@ -86,12 +89,9 @@ pending `agreed=true`).
 | 7 | self_direction | `src/autonomy/index.ts` (1 file) | ✅ `ls src/autonomy` → only `index.ts` |
 | 8 | self_direction | `src/suggest/extractors/self-improvement-extractor.ts:17-18` (`SCNS_REPO_RE`) | ✅ exact |
 | 9 | self_direction | `src/brain/decision-tree.ts:67-69` (`contextUsagePercent >= …`) | ✅ quote at line 68 (in range) |
-| 10 | voice_cloning | `grep -rin 'imessage\|sms' src` → 0 | ✅ count=0 |
-| 11 | voice_cloning | `grep -rin 'approved contact\|persona contact' src` → 0 | ✅ count=0 |
-| 12 | voice_cloning | `src/suggest/artifact-generators.ts:234-272` (generic skill scaffold) | ✅ quote at line 257 (in range) |
-| 13 | safe_outward | `config/safety-allowlist.json:3-5` (ships EMPTY = deny-all) | ✅ `_comment`@3, `hosts:[]`@4 |
-| 14 | safe_outward | `src/broker/startup.ts:313-315` (`loadAllowlist(SAFETY_ALLOWLIST_PATH)`) | ✅ exact |
-| 15 | safe_outward | `test/unit/broker/services/outward/consult-source.test.ts:37-87` (pos+neg) | ✅ exact + **re-ran, 5/5 pass** |
+| 10 | safe_outward | `config/safety-allowlist.json:3-5` (ships EMPTY = deny-all) | ✅ `_comment`@3, `hosts:[]`@4 |
+| 11 | safe_outward | `src/broker/startup.ts:313-315` (`loadAllowlist(SAFETY_ALLOWLIST_PATH)`) | ✅ exact |
+| 12 | safe_outward | `test/unit/broker/services/outward/consult-source.test.ts:37-87` (pos+neg) | ✅ exact + **re-ran, 5/5 pass** |
 
 **14/15 rows verify exactly.** Row 3's claim is substantiated (the artifact genuinely contains the quoted
 VERDICT) — only the line number is wrong (NIT-1).
