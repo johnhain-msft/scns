@@ -4,7 +4,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, rmSync, utimesSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { openMemoryDb, closeMemoryDb } from '../../../src/memory/db.js'
@@ -75,8 +75,15 @@ describe('Memory pipeline integration', () => {
     vault.write('MEMORY.md', 'The project uses Express 4 for the HTTP server.')
     indexVaultSync(db, vault)
 
-    // Update content
+    // Update content. The indexer shortlists candidates by mtime (the
+    // content-hash only gates files already shortlisted), so a second write
+    // landing in the same mtime granule is invisible to it — that product gap
+    // is issue #52 and has flaked this test on CI for months. This test is
+    // about re-indexing an updated file, not about granule collisions, so
+    // force the update into a fresh granule deterministically.
     vault.write('MEMORY.md', 'The project uses Express 5 for the HTTP server.')
+    const bumped = new Date(Date.now() + 2000)
+    utimesSync(join(rootDir, 'MEMORY.md'), bumped, bumped)
     indexVaultSync(db, vault)
 
     const results = keywordOnlySearch(db, 'Express')
