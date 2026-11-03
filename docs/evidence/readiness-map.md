@@ -22,11 +22,13 @@ largely unbuilt. This is the anti-over-claim result the operator asked for — n
 | **trustworthy_recall** | `built` | faithful MAGMA path is default-OFF; only a **measured NULL** exists — needs US2 fix + measurement | [trustworthy_recall.md](./audit/trustworthy_recall.md) |
 | **self_learning** | `built` | accept-vs-waste loop not closed live — `settleHumanOutcomeForAttempt` has **0 live callers** · ⚠ **stale as of 2026-07-25 — see erratum below** | [self_learning.md](./audit/self_learning.md) |
 | **self_direction** | `built` · BLOCKED | deterministic + SCNS-scoped; **no machine scheduler**, no new-app self-direction (`src/autonomy` = 1 file) | [self_direction.md](./audit/self_direction.md) |
-| **voice_cloning** | `specified` · BLOCKED | **no** persona/voice subsystem, texts ingestion, or persona-contact model | [voice_cloning.md](./audit/voice_cloning.md) |
 | _cross-cutting guards_ | `measured_with_controls` | core guards negatively-controlled; broker/allowlist/levers structural this session | [guards.md](./audit/guards.md) |
 
+> **2026-11 note:** a fifth, since-retired capability was audited in the original pass; it was dropped
+> from the roadmap and removed from this record.
+
 - **`usable` count: 0.** No over-claims to withdraw (adversarial pass upheld every grade).
-- **BLOCKED (Validity-of-Null)**: `self_direction`, `voice_cloning` — no mechanism exists to probe.
+- **BLOCKED (Validity-of-Null)**: `self_direction` — no mechanism exists to probe.
 - **Not blocked (fixable/measurable)**: `trustworthy_recall` (US2), `self_learning` (live loop wiring).
 
 > ### ⚠ ERRATUM 2026-07-25 — `self_learning`: the "0 live callers" gap line is out of date
@@ -65,8 +67,7 @@ largely unbuilt. This is the anti-over-claim result the operator asked for — n
 | **1** | trustworthy_recall (**← MAGMA fix / US2**) | Alg-1 anchor-eviction return-contract fix · Alg-3 causal-density restore · LoCoMo reproduction/health gate before any comparison | `measured_with_controls`; any faithful hybrid-vs-magma verdict |
 | **2** | self_learning | live per-attempt settling caller · default-on learned-policy consult · measured before/after outcome delta | the accept-vs-waste north-star loop |
 | **3** | self_direction | machine-limit scheduler · autonomous target discovery beyond SCNS · live observe→decide→schedule→act loop | point-it-at-a-new-app autonomy |
-| **4** | voice_cloning | texts ingestion · voice-feature extraction · persona-contact policy · persona-faithful agent generation · faithfulness measure | a faithful voice-clone skill+agent |
-| **5** | safe_outward | archived live e2e deny-all row via a guarded runtime broker probe | `safe_outward → usable` (hardening only) |
+| **4** | safe_outward | archived live e2e deny-all row via a guarded runtime broker probe | `safe_outward → usable` (hardening only) |
 
 ## MAGMA placement
 
@@ -77,8 +78,8 @@ hybrid-vs-magma verdict. It is a scoped fix behind default-OFF levers — not a 
 ## Honest distance-to-north-star
 
 The safety substrate is strong; memory recall is **one scoped fix (US2/MAGMA)** away from being *measurable*
-(not yet *proven*); self-learning needs its live loop closed and measured; and the two headline autonomy
-capabilities — **autonomous self-direction** and **voice cloning** — are largely unbuilt downstream work the
+(not yet *proven*); self-learning needs its live loop closed and measured; and the headline autonomy
+capability — **autonomous self-direction** — is largely unbuilt downstream work the
 audit sizes but this effort does not deliver. SCNS is a well-guarded harness with real memory/learning
 mechanisms mostly running **dark** (default-OFF, shadow, or unwired), not yet a point-it-and-go second brain.
 

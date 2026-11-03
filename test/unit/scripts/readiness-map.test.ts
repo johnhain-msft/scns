@@ -56,11 +56,20 @@ function validMap(): ReadinessMap {
       builtCapability('trustworthy_recall'),
       builtCapability('self_learning'),
       builtCapability('self_direction'),
-      builtCapability('voice_cloning'),
     ],
     prioritized_gap_map: [
-      { capability_id: 'self_direction', priority: 1, missing_pieces: ['scheduler'], blocks: ['autonomy'] },
-      { capability_id: 'trustworthy_recall', priority: 2, missing_pieces: ['magma fix'], blocks: ['recall'] },
+      {
+        capability_id: 'self_direction',
+        priority: 1,
+        missing_pieces: ['scheduler'],
+        blocks: ['autonomy'],
+      },
+      {
+        capability_id: 'trustworthy_recall',
+        priority: 2,
+        missing_pieces: ['magma fix'],
+        blocks: ['recall'],
+      },
     ],
     magma_placement: 'US2 sits at priority 2 (trustworthy_recall measured-with-controls gap)',
     distance_summary: 'far from usable overall; safe_outward is the only usable capability today',
@@ -68,20 +77,20 @@ function validMap(): ReadinessMap {
 }
 
 describe('validateReadinessMap — coverage (SC-001)', () => {
-  it('POSITIVE: a valid map with all five capabilities returns zero problems', () => {
+  it('POSITIVE: a valid map with all four capabilities returns zero problems', () => {
     expect(validateReadinessMap(validMap())).toEqual([])
   })
 
-  it('exposes exactly the five north-star capability ids', () => {
+  it('exposes exactly the four north-star capability ids', () => {
     expect([...CAPABILITY_IDS].sort()).toEqual(
-      ['safe_outward', 'self_direction', 'self_learning', 'trustworthy_recall', 'voice_cloning'].sort(),
+      ['safe_outward', 'self_direction', 'self_learning', 'trustworthy_recall'].sort(),
     )
   })
 
   it('NEGATIVE: a missing capability is rejected', () => {
     const m = validMap()
-    m.capabilities = m.capabilities.filter((c) => c.capability_id !== 'voice_cloning')
-    expect(validateReadinessMap(m).join(' ')).toMatch(/voice_cloning|coverage|5 capabilit/i)
+    m.capabilities = m.capabilities.filter((c) => c.capability_id !== 'self_direction')
+    expect(validateReadinessMap(m).join(' ')).toMatch(/self_direction|coverage|4 capabilit/i)
   })
 
   it('NEGATIVE: a duplicated capability is rejected', () => {
@@ -124,7 +133,10 @@ describe('validateReadinessMap — BLOCKED not faked (FR-003)', () => {
   it('POSITIVE: a blocked capability with could_setup_show_win:false + a named precondition passes', () => {
     const m = validMap()
     const cap = m.capabilities.find((c) => c.capability_id === 'self_direction')!
-    cap.blocked = { missing_precondition: 'no scheduler subsystem exists', could_setup_show_win: false }
+    cap.blocked = {
+      missing_precondition: 'no scheduler subsystem exists',
+      could_setup_show_win: false,
+    }
     expect(validateReadinessMap(m)).toEqual([])
   })
 

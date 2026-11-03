@@ -80,7 +80,6 @@ describe('T010 — audit POSITIVE control (safe_outward grades usable)', () => {
       experienceApisBuilt(),
       fillerBuilt('trustworthy_recall'),
       fillerBuilt('self_direction'),
-      fillerBuilt('voice_cloning'),
     )
     expect(validateReadinessMap(map)).toEqual([])
   })
@@ -93,7 +92,6 @@ describe('T010 — audit POSITIVE control (safe_outward grades usable)', () => {
       experienceApisBuilt(),
       fillerBuilt('trustworthy_recall'),
       fillerBuilt('self_direction'),
-      fillerBuilt('voice_cloning'),
     )
     expect(validateReadinessMap(map).join(' ')).toMatch(/safe_outward.*usable.*evidence/i)
   })
@@ -106,7 +104,6 @@ describe('T010 — audit NEGATIVE control (per-attempt experience APIs grade ≤
       experienceApisBuilt(),
       fillerBuilt('trustworthy_recall'),
       fillerBuilt('self_direction'),
-      fillerBuilt('voice_cloning'),
     )
     const problems = validateReadinessMap(map)
     expect(problems).toEqual([])
@@ -122,7 +119,6 @@ describe('T010 — audit NEGATIVE control (per-attempt experience APIs grade ≤
       overGraded,
       fillerBuilt('trustworthy_recall'),
       fillerBuilt('self_direction'),
-      fillerBuilt('voice_cloning'),
     )
     expect(validateReadinessMap(map).join(' ')).toMatch(/self_learning.*usable.*evidence/i)
   })
@@ -133,7 +129,6 @@ describe('T010 — audit NEGATIVE control (per-attempt experience APIs grade ≤
       experienceApisBuilt(),
       fillerBuilt('trustworthy_recall'),
       fillerBuilt('self_direction'),
-      fillerBuilt('voice_cloning'),
     )
     expect(validateReadinessMap(map)).toEqual([])
     const usable = map.capabilities.filter((c) => c.state === 'usable').map((c) => c.capability_id)
