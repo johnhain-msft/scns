@@ -1,0 +1,168 @@
+{
+    "mode": "repro-accuracy",
+    "snapshot": "$HOME/Coding_Projects/scns_root/scns/.copilot-scratch/t030-20260706-203640/frontier/snap",
+    "sampleIds": [
+        "conv-48",
+        "conv-49",
+        "conv-50"
+    ],
+    "nItems": 90,
+    "byCategory": "cat1=18 cat2=18 cat3=18 cat4=18 cat5=18",
+    "reproduction": {
+        "overall": 0.7683,
+        "overall_ci95": 0.0794,
+        "full_context_overall": 0.6528,
+        "scrambled_overall": 0.7611,
+        "scrambled_delta": 0.0072,
+        "perCategory": {
+            "cat1": {
+                "n": 18,
+                "accuracy": 0.8028
+            },
+            "cat2": {
+                "n": 18,
+                "accuracy": 0.5556
+            },
+            "cat3": {
+                "n": 18,
+                "accuracy": 0.7611
+            },
+            "cat4": {
+                "n": 18,
+                "accuracy": 0.7778
+            },
+            "cat5": {
+                "n": 18,
+                "accuracy": 0.9444
+            }
+        },
+        "full_context_perCategory": {
+            "cat1": {
+                "n": 18,
+                "accuracy": 0.7389
+            },
+            "cat2": {
+                "n": 17,
+                "accuracy": 0.0588
+            },
+            "cat3": {
+                "n": 18,
+                "accuracy": 0.7167
+            },
+            "cat4": {
+                "n": 18,
+                "accuracy": 0.7167
+            },
+            "cat5": {
+                "n": 18,
+                "accuracy": 1
+            }
+        },
+        "scrambled_perCategory": {
+            "cat1": {
+                "n": 18,
+                "accuracy": 0.8
+            },
+            "cat2": {
+                "n": 18,
+                "accuracy": 0.5444
+            },
+            "cat3": {
+                "n": 18,
+                "accuracy": 0.7056
+            },
+            "cat4": {
+                "n": 18,
+                "accuracy": 0.8111
+            },
+            "cat5": {
+                "n": 18,
+                "accuracy": 0.9444
+            }
+        },
+        "band_pass": true,
+        "category_pattern_pass": false,
+        "ordering_pass": true,
+        "scrambled_control": false,
+        "substrate_pass": true,
+        "diagnostics": {
+            "anchor_retention": 1,
+            "anchor_retention_source": "T021 unit-test-proven",
+            "mean_tokens_per_query": 3454,
+            "full_context_mean_tokens": 1950,
+            "scrambled_mean_tokens": 3463,
+            "judge_sigma": 0.0267,
+            "scramble_seed": 20260707,
+            "scramble_report": [
+                {
+                    "conv": 0,
+                    "totalEdges": 3470,
+                    "changed": 3457,
+                    "byType": [
+                        {
+                            "edgeType": "temporal",
+                            "edges": 1980,
+                            "changed": 1976
+                        },
+                        {
+                            "edgeType": "semantic",
+                            "edges": 1458,
+                            "changed": 1451
+                        },
+                        {
+                            "edgeType": "causal",
+                            "edges": 32,
+                            "changed": 30
+                        }
+                    ]
+                },
+                {
+                    "conv": 1,
+                    "totalEdges": 3700,
+                    "changed": 3686,
+                    "byType": [
+                        {
+                            "edgeType": "temporal",
+                            "edges": 1892,
+                            "changed": 1889
+                        },
+                        {
+                            "edgeType": "semantic",
+                            "edges": 1724,
+                            "changed": 1714
+                        },
+                        {
+                            "edgeType": "causal",
+                            "edges": 84,
+                            "changed": 83
+                        }
+                    ]
+                },
+                {
+                    "conv": 2,
+                    "totalEdges": 5142,
+                    "changed": 5125,
+                    "byType": [
+                        {
+                            "edgeType": "temporal",
+                            "edges": 2582,
+                            "changed": 2577
+                        },
+                        {
+                            "edgeType": "semantic",
+                            "edges": 2460,
+                            "changed": 2449
+                        },
+                        {
+                            "edgeType": "causal",
+                            "edges": 100,
+                            "changed": 99
+                        }
+                    ]
+                }
+            ],
+            "snapshot_unchanged": true
+        },
+        "verdict": "NOT_REPRODUCED"
+    }
+}

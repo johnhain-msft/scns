@@ -1,0 +1,365 @@
+=== LoCoMo LLM-Judge harness :: mode=repro-accuracy :: DEV=5 conv (held-out 5) ===
+ISO spawn cwd: $HOME/Coding_Projects/scns_root/scns/.copilot-scratch/scns-judge-iso-7TCfzB | gen model: (session default) | judge model: (session default)
+
+=== REPRO-ACCURACY (T030 MAGMA-only judged reproduction; no hybrid/comparative arms) :: snapshot $HOME/Coding_Projects/scns_root/scns/.copilot-scratch/t030-20260706-203640/frontier/snap ===
+  bound 15 native LoCoMo QA items (cat1=3 cat2=3 cat3=3 cat4=3 cat5=3); PRE-CHECK causal materialized=216/persisted=108
+
+  ── magma-only {"intentRouting":false,"traverse":true,"traversalOptions":{"maxDepth":5,"budget":200},"synthesize":true} ──
+[23:33:07.819] [32mINFO[39m (scns/61768): [36mACP client initialized[39m
+    [35mmodule[39m: "acp-client"
+    [35magentInfo[39m: {
+      "name": "Copilot",
+      "title": "Copilot",
+      "version": "1.0.68"
+    }
+[23:33:16.083] [32mINFO[39m (scns/61768): [36mACP process exited[39m
+    [35mmodule[39m: "acp-client"
+    [35mcode[39m: 0
+    [35msignal[39m: null
+[23:33:16.400] [32mINFO[39m (scns/61768): [36mACP client initialized[39m
+    [35mmodule[39m: "acp-client"
+    [35magentInfo[39m: {
+      "name": "Copilot",
+      "title": "Copilot",
+      "version": "1.0.68"
+    }
+  magma[cat2] score=0 tok=271 22847ms
+[23:33:29.818] [32mINFO[39m (scns/61768): [36mACP process exited[39m
+    [35mmodule[39m: "acp-client"
+    [35mcode[39m: 0
+    [35msignal[39m: null
+[23:33:30.206] [32mINFO[39m (scns/61768): [36mACP client initialized[39m
+    [35mmodule[39m: "acp-client"
+    [35magentInfo[39m: {
+      "name": "Copilot",
+      "title": "Copilot",
+      "version": "1.0.68"
+    }
+[23:33:37.628] [32mINFO[39m (scns/61768): [36mACP process exited[39m
+    [35mmodule[39m: "acp-client"
+    [35mcode[39m: 0
+    [35msignal[39m: null
+[23:33:37.995] [32mINFO[39m (scns/61768): [36mACP client initialized[39m
+    [35mmodule[39m: "acp-client"
+    [35magentInfo[39m: {
+      "name": "Copilot",
+      "title": "Copilot",
+      "version": "1.0.68"
+    }
+  magma[cat1] score=1 tok=244 15874ms
+[23:33:45.470] [32mINFO[39m (scns/61768): [36mACP process exited[39m
+    [35mmodule[39m: "acp-client"
+    [35mcode[39m: 0
+    [35msignal[39m: null
+[23:33:46.108] [32mINFO[39m (scns/61768): [36mACP client initialized[39m
+    [35mmodule[39m: "acp-client"
+    [35magentInfo[39m: {
+      "name": "Copilot",
+      "title": "Copilot",
+      "version": "1.0.68"
+    }
+[23:33:51.542] [32mINFO[39m (scns/61768): [36mACP process exited[39m
+    [35mmodule[39m: "acp-client"
+    [35mcode[39m: 0
+    [35msignal[39m: null
+[23:33:51.856] [32mINFO[39m (scns/61768): [36mACP client initialized[39m
+    [35mmodule[39m: "acp-client"
+    [35magentInfo[39m: {
+      "name": "Copilot",
+      "title": "Copilot",
+      "version": "1.0.68"
+    }
+  magma[cat3] score=1 tok=355 11467ms
+[23:33:56.893] [32mINFO[39m (scns/61768): [36mACP process exited[39m
+    [35mmodule[39m: "acp-client"
+    [35mcode[39m: 0
+    [35msignal[39m: null
+[23:33:57.537] [32mINFO[39m (scns/61768): [36mACP client initialized[39m
+    [35mmodule[39m: "acp-client"
+    [35magentInfo[39m: {
+      "name": "Copilot",
+      "title": "Copilot",
+      "version": "1.0.68"
+    }
+[23:34:05.553] [32mINFO[39m (scns/61768): [36mACP process exited[39m
+    [35mmodule[39m: "acp-client"
+    [35mcode[39m: 0
+    [35msignal[39m: null
+[23:34:05.657] [32mINFO[39m (scns/61768): [36mACP client initialized[39m
+    [35mmodule[39m: "acp-client"
+    [35magentInfo[39m: {
+      "name": "Copilot",
+      "title": "Copilot",
+      "version": "1.0.68"
+    }
+  magma[cat4] score=0 tok=237 22117ms
+[23:34:19.384] [32mINFO[39m (scns/61768): [36mACP process exited[39m
+    [35mmodule[39m: "acp-client"
+    [35mcode[39m: 0
+    [35msignal[39m: null
+[23:34:19.675] [32mINFO[39m (scns/61768): [36mACP client initialized[39m
+    [35mmodule[39m: "acp-client"
+    [35magentInfo[39m: {
+      "name": "Copilot",
+      "title": "Copilot",
+      "version": "1.0.68"
+    }
+[23:34:27.600] [32mINFO[39m (scns/61768): [36mACP process exited[39m
+    [35mmodule[39m: "acp-client"
+    [35mcode[39m: 0
+    [35msignal[39m: null
+[23:34:27.867] [32mINFO[39m (scns/61768): [36mACP client initialized[39m
+    [35mmodule[39m: "acp-client"
+    [35magentInfo[39m: {
+      "name": "Copilot",
+      "title": "Copilot",
+      "version": "1.0.68"
+    }
+  magma[cat5] score=1 tok=271 15974ms
+[23:34:35.621] [32mINFO[39m (scns/61768): [36mACP client initialized[39m
+    [35mmodule[39m: "acp-client"
+    [35magentInfo[39m: {
+      "name": "Copilot",
+      "title": "Copilot",
+      "version": "1.0.68"
+    }
+[23:34:36.380] [32mINFO[39m (scns/61768): [36mACP process exited[39m
+    [35mmodule[39m: "acp-client"
+    [35mcode[39m: 0
+    [35msignal[39m: null
+[23:34:44.850] [32mINFO[39m (scns/61768): [36mACP process exited[39m
+    [35mmodule[39m: "acp-client"
+    [35mcode[39m: 0
+    [35msignal[39m: null
+[23:34:45.170] [32mINFO[39m (scns/61768): [36mACP client initialized[39m
+    [35mmodule[39m: "acp-client"
+    [35magentInfo[39m: {
+      "name": "Copilot",
+      "title": "Copilot",
+      "version": "1.0.68"
+    }
+  magma[cat1] score=0.4 tok=227 25196ms
+[23:35:00.215] [32mINFO[39m (scns/61768): [36mACP process exited[39m
+    [35mmodule[39m: "acp-client"
+    [35mcode[39m: 0
+    [35msignal[39m: null
+[23:35:00.837] [32mINFO[39m (scns/61768): [36mACP client initialized[39m
+    [35mmodule[39m: "acp-client"
+    [35magentInfo[39m: {
+      "name": "Copilot",
+      "title": "Copilot",
+      "version": "1.0.68"
+    }
+[23:35:07.792] [32mINFO[39m (scns/61768): [36mACP process exited[39m
+    [35mmodule[39m: "acp-client"
+    [35mcode[39m: 0
+    [35msignal[39m: null
+[23:35:08.032] [32mINFO[39m (scns/61768): [36mACP client initialized[39m
+    [35mmodule[39m: "acp-client"
+    [35magentInfo[39m: {
+      "name": "Copilot",
+      "title": "Copilot",
+      "version": "1.0.68"
+    }
+  magma[cat2] score=0 tok=343 21454ms
+[23:35:21.571] [32mINFO[39m (scns/61768): [36mACP process exited[39m
+    [35mmodule[39m: "acp-client"
+    [35mcode[39m: 0
+    [35msignal[39m: null
+[23:35:22.273] [32mINFO[39m (scns/61768): [36mACP client initialized[39m
+    [35mmodule[39m: "acp-client"
+    [35magentInfo[39m: {
+      "name": "Copilot",
+      "title": "Copilot",
+      "version": "1.0.68"
+    }
+[23:35:28.114] [32mINFO[39m (scns/61768): [36mACP process exited[39m
+    [35mmodule[39m: "acp-client"
+    [35mcode[39m: 0
+    [35msignal[39m: null
+[23:35:28.465] [32mINFO[39m (scns/61768): [36mACP client initialized[39m
+    [35mmodule[39m: "acp-client"
+    [35magentInfo[39m: {
+      "name": "Copilot",
+      "title": "Copilot",
+      "version": "1.0.68"
+    }
+  magma[cat3] score=0 tok=198 22055ms
+[23:35:44.241] [32mINFO[39m (scns/61768): [36mACP process exited[39m
+    [35mmodule[39m: "acp-client"
+    [35mcode[39m: 0
+    [35msignal[39m: null
+[23:35:44.418] [32mINFO[39m (scns/61768): [36mACP client initialized[39m
+    [35mmodule[39m: "acp-client"
+    [35magentInfo[39m: {
+      "name": "Copilot",
+      "title": "Copilot",
+      "version": "1.0.68"
+    }
+[23:35:52.324] [32mINFO[39m (scns/61768): [36mACP process exited[39m
+    [35mmodule[39m: "acp-client"
+    [35mcode[39m: 0
+    [35msignal[39m: null
+[23:35:52.676] [32mINFO[39m (scns/61768): [36mACP client initialized[39m
+    [35mmodule[39m: "acp-client"
+    [35magentInfo[39m: {
+      "name": "Copilot",
+      "title": "Copilot",
+      "version": "1.0.68"
+    }
+  magma[cat4] score=0 tok=298 21022ms
+[23:36:05.290] [32mINFO[39m (scns/61768): [36mACP process exited[39m
+    [35mmodule[39m: "acp-client"
+    [35mcode[39m: 0
+    [35msignal[39m: null
+[23:36:05.357] [32mINFO[39m (scns/61768): [36mACP client initialized[39m
+    [35mmodule[39m: "acp-client"
+    [35magentInfo[39m: {
+      "name": "Copilot",
+      "title": "Copilot",
+      "version": "1.0.68"
+    }
+[23:36:13.051] [32mINFO[39m (scns/61768): [36mACP process exited[39m
+    [35mmodule[39m: "acp-client"
+    [35mcode[39m: 0
+    [35msignal[39m: null
+[23:36:13.380] [32mINFO[39m (scns/61768): [36mACP client initialized[39m
+    [35mmodule[39m: "acp-client"
+    [35magentInfo[39m: {
+      "name": "Copilot",
+      "title": "Copilot",
+      "version": "1.0.68"
+    }
+  magma[cat5] score=1 tok=325 15686ms
+[23:36:20.757] [32mINFO[39m (scns/61768): [36mACP process exited[39m
+    [35mmodule[39m: "acp-client"
+    [35mcode[39m: 0
+    [35msignal[39m: null
+[23:36:21.060] [32mINFO[39m (scns/61768): [36mACP client initialized[39m
+    [35mmodule[39m: "acp-client"
+    [35magentInfo[39m: {
+      "name": "Copilot",
+      "title": "Copilot",
+      "version": "1.0.68"
+    }
+[23:36:27.452] [32mINFO[39m (scns/61768): [36mACP process exited[39m
+    [35mmodule[39m: "acp-client"
+    [35mcode[39m: 0
+    [35msignal[39m: null
+[23:36:27.815] [32mINFO[39m (scns/61768): [36mACP client initialized[39m
+    [35mmodule[39m: "acp-client"
+    [35magentInfo[39m: {
+      "name": "Copilot",
+      "title": "Copilot",
+      "version": "1.0.68"
+    }
+  magma[cat2] score=0 tok=377 23684ms
+[23:36:44.414] [32mINFO[39m (scns/61768): [36mACP process exited[39m
+    [35mmodule[39m: "acp-client"
+    [35mcode[39m: 0
+    [35msignal[39m: null
+[23:36:44.735] [32mINFO[39m (scns/61768): [36mACP client initialized[39m
+    [35mmodule[39m: "acp-client"
+    [35magentInfo[39m: {
+      "name": "Copilot",
+      "title": "Copilot",
+      "version": "1.0.68"
+    }
+[23:36:52.604] [32mINFO[39m (scns/61768): [36mACP process exited[39m
+    [35mmodule[39m: "acp-client"
+    [35mcode[39m: 0
+    [35msignal[39m: null
+[23:36:52.755] [32mINFO[39m (scns/61768): [36mACP client initialized[39m
+    [35mmodule[39m: "acp-client"
+    [35magentInfo[39m: {
+      "name": "Copilot",
+      "title": "Copilot",
+      "version": "1.0.68"
+    }
+  magma[cat1] score=0.8 tok=300 20239ms
+[23:37:04.324] [32mINFO[39m (scns/61768): [36mACP process exited[39m
+    [35mmodule[39m: "acp-client"
+    [35mcode[39m: 0
+    [35msignal[39m: null
+[23:37:05.011] [32mINFO[39m (scns/61768): [36mACP client initialized[39m
+    [35mmodule[39m: "acp-client"
+    [35magentInfo[39m: {
+      "name": "Copilot",
+      "title": "Copilot",
+      "version": "1.0.68"
+    }
+[23:37:11.514] [32mINFO[39m (scns/61768): [36mACP process exited[39m
+    [35mmodule[39m: "acp-client"
+    [35mcode[39m: 0
+    [35msignal[39m: null
+[23:37:11.669] [32mINFO[39m (scns/61768): [36mACP client initialized[39m
+    [35mmodule[39m: "acp-client"
+    [35magentInfo[39m: {
+      "name": "Copilot",
+      "title": "Copilot",
+      "version": "1.0.68"
+    }
+  magma[cat3] score=0.8 tok=279 15828ms
+[23:37:20.345] [32mINFO[39m (scns/61768): [36mACP process exited[39m
+    [35mmodule[39m: "acp-client"
+    [35mcode[39m: 0
+    [35msignal[39m: null
+[23:37:20.818] [32mINFO[39m (scns/61768): [36mACP client initialized[39m
+    [35mmodule[39m: "acp-client"
+    [35magentInfo[39m: {
+      "name": "Copilot",
+      "title": "Copilot",
+      "version": "1.0.68"
+    }
+[23:37:30.494] [32mINFO[39m (scns/61768): [36mACP process exited[39m
+    [35mmodule[39m: "acp-client"
+    [35mcode[39m: 0
+    [35msignal[39m: null
+[23:37:30.620] [32mINFO[39m (scns/61768): [36mACP client initialized[39m
+    [35mmodule[39m: "acp-client"
+    [35magentInfo[39m: {
+      "name": "Copilot",
+      "title": "Copilot",
+      "version": "1.0.68"
+    }
+  magma[cat4] score=0 tok=290 26362ms
+[23:37:46.852] [32mINFO[39m (scns/61768): [36mACP process exited[39m
+    [35mmodule[39m: "acp-client"
+    [35mcode[39m: 0
+    [35msignal[39m: null
+[23:37:47.184] [32mINFO[39m (scns/61768): [36mACP client initialized[39m
+    [35mmodule[39m: "acp-client"
+    [35magentInfo[39m: {
+      "name": "Copilot",
+      "title": "Copilot",
+      "version": "1.0.68"
+    }
+[23:37:53.226] [32mINFO[39m (scns/61768): [36mACP process exited[39m
+    [35mmodule[39m: "acp-client"
+    [35mcode[39m: 0
+    [35msignal[39m: null
+[23:37:53.383] [32mINFO[39m (scns/61768): [36mACP client initialized[39m
+    [35mmodule[39m: "acp-client"
+    [35magentInfo[39m: {
+      "name": "Copilot",
+      "title": "Copilot",
+      "version": "1.0.68"
+    }
+  magma[cat5] score=1 tok=298 14744ms
+    cat1: n=3 meanScore=0.7333
+    cat2: n=3 meanScore=0
+    cat3: n=3 meanScore=0.6
+    cat4: n=3 meanScore=0
+    cat5: n=3 meanScore=1
+
+  MAGMA reproduction: overall=0.4667 ± 0.2409 (95% CI) n=15 dropped=0; band_pass=false; category_pattern_pass=false; verdict=NOT_REPRODUCED
+
+RESULTS_JSON: {"mode":"repro-accuracy","snapshot":"$HOME/Coding_Projects/scns_root/scns/.copilot-scratch/t030-20260706-203640/frontier/snap","sampleIds":["conv-48","conv-49","conv-50"],"nItems":15,"byCategory":"cat1=3 cat2=3 cat3=3 cat4=3 cat5=3","reproduction":{"overall":0.4667,"overall_ci95":0.2409,"full_context_overall":null,"perCategory":{"cat1":{"n":3,"accuracy":0.7333},"cat2":{"n":3,"accuracy":0},"cat3":{"n":3,"accuracy":0.6},"cat4":{"n":3,"accuracy":0},"cat5":{"n":3,"accuracy":1}},"band_pass":false,"category_pattern_pass":false,"ordering_pass":null,"substrate_pass":true,"scrambled_control":null,"diagnostics":{"anchor_retention":1,"anchor_retention_source":"T021 unit-test-proven","mean_tokens_per_query":288},"verdict":"NOT_REPRODUCED"}}
+[23:38:01.226] [32mINFO[39m (scns/61768): [36mACP process exited[39m
+    [35mmodule[39m: "acp-client"
+    [35mcode[39m: 0
+    [35msignal[39m: null
+
+spawn guard: 30 ephemeral ACP process(es) spawned; still-alive 0; strays killed-by-pid 0; exit-signalled 30
+ISO cleaned (zero-pollution): YES ✓
+live vault mtime unchanged: YES ✓ (1783256409593.3137 → 1783256409593.3137)

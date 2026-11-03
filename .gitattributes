@@ -1,0 +1,25 @@
+# Pin LF for every text file on every platform. Tests read source files and
+# compare exact lines (e.g. followup-hardening reads settle.ts); a CRLF
+# checkout on the Windows CI runner made every such comparison fail with
+# invisible \r diffs. eol=lf makes the checkout byte-identical everywhere.
+* text=auto eol=lf
+
+# Windows shell scripts are the one place CRLF is load-bearing.
+*.cmd text eol=crlf
+*.bat text eol=crlf
+*.ps1 text eol=crlf
+
+# Never normalize binaries.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.zip binary
+*.gz binary
+*.node binary
+*.wasm binary
+*.db binary
+*.sqlite binary
+*.onnx binary

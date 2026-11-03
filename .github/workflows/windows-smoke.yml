@@ -1,0 +1,41 @@
+# NON-BLOCKING Windows smoke check (WI-1d stretch).
+#
+# GitHub Actions may not be available on this plan/repo — nothing in the v1
+# ship gate depends on this file. If Actions IS available it gives an early
+# native-Windows signal (install, build, unit tests) before John pulls the
+# branch on the work machine. Never make this required for merge.
+name: windows-smoke
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+
+jobs:
+  windows-smoke:
+    runs-on: windows-latest
+    # Advisory only — a red run must not block a merge.
+    continue-on-error: true
+    # `continue-on-error` stops a failure blocking a merge; it does NOT stop a
+    # hung job holding a Windows runner (billed at 2x) to the 360-minute
+    # default. Advisory means cheap to ignore, not free to run forever.
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        # The LTS majors inside the supported range declared by
+        # package.json#engines. Each exercises a different better-sqlite3
+        # prebuild ABI (115 / 127 / 137), which is the thing that actually
+        # breaks: a single-version job cannot catch a range claim going stale.
+        node-version: [20, 22, 24]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+      - name: Install (exercises win32 prebuild fetch for native deps)
+        run: npm ci
+      - name: Build (exercises the cross-platform asset-copy pipeline)
+        run: npm run build
+      - name: Unit tests
+        run: npm run test:unit

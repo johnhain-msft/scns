@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<!--
+  TEMPLATE - macOS launchd. Substitute before `launchctl load`:
+    __HOME__          your home directory, e.g. /Users/you
+    __SCNS_REPO__     absolute path to this SCNS clone
+    __NODE_BIN_DIR__  directory holding the Node 20 binary (SCNS requires Node 20 - see README)
+  launchd does NOT expand `~` or environment variables in these strings, so an
+  unsubstituted placeholder fails loudly instead of silently resolving somewhere wrong.
+-->
+<dict>
+    <key>Label</key>
+    <string>com.scns.daily-restart</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>__SCNS_REPO__/scripts/broker-restart.sh</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>__SCNS_REPO__</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>__NODE_BIN_DIR__:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <key>HOME</key>
+        <string>__HOME__</string>
+        <key>NODE_ENV</key>
+        <string>production</string>
+    </dict>
+
+    <!-- Run daily at 6:00 AM local time (after dream cycle) -->
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>6</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+
+    <key>StandardOutPath</key>
+    <string>__HOME__/.scns/logs/daily-restart-stdout.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>__HOME__/.scns/logs/daily-restart-stderr.log</string>
+</dict>
+</plist>

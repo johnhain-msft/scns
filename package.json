@@ -1,0 +1,66 @@
+{
+  "name": "scns",
+  "version": "0.1.0",
+  "description": "Second Central Nervous System — autonomous second brain + nervous system",
+  "license": "Apache-2.0",
+  "type": "module",
+  "engines": {
+    "node": "^20.0.0 || ^22.0.0 || ^23.0.0 || ^24.0.0 || ^25.0.0"
+  },
+  "overrides": {
+    "fastembed": {
+      "tar": "^7.5.13"
+    }
+  },
+  "bin": {
+    "scns": "./dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc && node scripts/copy-assets.mjs && node scripts/build-native.mjs",
+    "dev": "tsc --watch",
+    "start": "node dist/cli.js start",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:unit": "vitest run test/unit",
+    "test:integration": "vitest run test/integration",
+    "test:e2e": "vitest run --config vitest.config.e2e.ts",
+    "test:stress": "vitest run --config vitest.config.stress.ts",
+    "test:coverage": "vitest run --coverage",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\" \"scripts/**/*.{ts,mjs,cjs,js}\"",
+    "format:check": "prettier --check \"src/**/*.ts\" \"test/**/*.ts\" \"scripts/**/*.{ts,mjs,cjs,js}\"",
+    "format:check:changed": "node scripts/format-check-changed.mjs",
+    "typecheck": "tsc --noEmit",
+    "dashboard:screenshots": "npm run screenshots --prefix dashboard",
+    "clean": "node scripts/clean.mjs",
+    "postinstall": "node scripts/patch-fastembed-tar.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.1",
+    "better-sqlite3": "~12.9.0",
+    "commander": "^13.1.0",
+    "express": "^5.1.0",
+    "fastembed": "^1.14.4",
+    "pino": "^9.6.0",
+    "pino-pretty": "^13.0.0",
+    "sqlite-vec": "^0.1.6",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/express": "^5.0.2",
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^22.15.2",
+    "@vitest/coverage-v8": "^3.1.2",
+    "eslint": "^9.25.1",
+    "eslint-config-prettier": "^10.1.2",
+    "gpt-tokenizer": "^3.4.0",
+    "js-yaml": "^4.3.2",
+    "prettier": "^3.5.3",
+    "tsx": "^4.23.9",
+    "typescript": "^5.8.3",
+    "typescript-eslint": "^8.31.0",
+    "vitest": "^3.1.2"
+  }
+}

@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# SCNS anti-drift guard (M1): main only moves via PR — no direct commits.
+#
+# GitHub-side branch protection is plan-gated on this private repo
+# (403 "Upgrade to GitHub Pro", 2026-08-15), so enforcement is repo-local.
+# Installed via `bash scripts/install-git-hooks.sh` (core.hooksPath).
+#
+# Escape hatch — John only, logged loudly:
+#   SCNS_ALLOW_MAIN_PUSH=1 git commit ...
+#
+# Note: `git merge`/`git pull` on main do not run pre-commit, so keeping a
+# local main in sync with origin is unaffected.
+
+branch=$(git symbolic-ref --quiet --short HEAD || echo "")
+
+if [ "$branch" = "main" ]; then
+  if [ "${SCNS_ALLOW_MAIN_PUSH:-0}" = "1" ]; then
+    echo "[scns-git-hooks] OVERRIDE: SCNS_ALLOW_MAIN_PUSH=1 — allowing direct commit on main at $(date -u +%Y-%m-%dT%H:%M:%SZ)" >&2
+    exit 0
+  fi
+  echo "[scns-git-hooks] REJECTED: direct commit on main." >&2
+  echo "[scns-git-hooks] Branch first, then PR:  git checkout -b <topic-branch>" >&2
+  echo "[scns-git-hooks] Escape hatch (John only, logged): SCNS_ALLOW_MAIN_PUSH=1 git commit ..." >&2
+  exit 1
+fi
+
+exit 0

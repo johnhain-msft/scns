@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# SCNS anti-drift guard (M1): no push may update (or delete) refs/heads/main.
+#
+# git feeds pre-push one line per ref on stdin:
+#   <local ref> <local sha> <remote ref> <remote sha>
+# Any line targeting refs/heads/main is rejected unless the escape hatch
+# SCNS_ALLOW_MAIN_PUSH=1 is set (John only — the override is logged loudly).
+#
+# Topic branches (including the broker's scns/auto/* branches) pass through
+# untouched; only the main ref is guarded.
+
+blocked=0
+
+while read -r local_ref local_sha remote_ref remote_sha; do
+  [ -z "$remote_ref" ] && continue
+  if [ "$remote_ref" = "refs/heads/main" ]; then
+    if [ "${SCNS_ALLOW_MAIN_PUSH:-0}" = "1" ]; then
+      echo "[scns-git-hooks] OVERRIDE: SCNS_ALLOW_MAIN_PUSH=1 — allowing push to main (${local_sha}) at $(date -u +%Y-%m-%dT%H:%M:%SZ)" >&2
+    else
+      echo "[scns-git-hooks] REJECTED: direct push to main." >&2
+      echo "[scns-git-hooks] Push a topic branch and open a PR instead." >&2
+      echo "[scns-git-hooks] Escape hatch (John only, logged): SCNS_ALLOW_MAIN_PUSH=1 git push ..." >&2
+      blocked=1
+    fi
+  fi
+done
+
+exit "$blocked"

@@ -1,0 +1,90 @@
+{
+  "generated_in_context": "496bc1fe-dev-worker (feature 002 MVP; T001-T018)",
+  "signoff": {
+    "producer_context_id": "496bc1fe-dev-worker",
+    "grader_context_id": "06c710b0-t019-independent-grader",
+    "agreed": true
+  },
+  "signoff_note": "T019 independent sign-off COMPLETE (verdict APPROVE-WITH-NITS): a fresh grader context (06c710b0, producer != grader) re-derived the verdict from raw evidence, re-ran the validator + controls under isolation, spot-checked all 15 evidence rows, and agrees. See docs/evidence/readiness-map.signoff.md. Validator returns 0 problems. One recorded nit: the trustworthy_recall measured-NULL VERDICT is real but cited at us1-cert-run-2026-07-06.log:45-53 while the verbatim line is :1108 (fix during US2 cleanup).",
+  "capabilities": [
+    {
+      "capability_id": "trustworthy_recall",
+      "state": "built",
+      "gap": "No live faithful-path end-to-end proof measured on the answer-quality + token axis under pos/neg controls; the live default is hybrid and the faithful magma path is default-OFF. This is US2 (anchor-eviction + starved-substrate fixes + reproduction gate).",
+      "backing_subsystems": ["src/memory/adaptive-traversal.ts", "src/memory/intent-search.ts", "src/memory/retrieval-context.ts", "src/cli.ts", "src/memory/arm-router.ts"],
+      "evidence": [
+        { "claim": "live default retrieval is plain hybrid, not magma", "quoted_output": "enabled: process.env.SCNS_INTENT_ROUTING === '1',", "artifact_ref": "src/cli.ts:949-951" },
+        { "claim": "traverse/magma is opt-in default-off", "quoted_output": "const traverseOn = process.env.SCNS_TRAVERSE_ROUTING === '1' || (process.env.SCNS_TRAVERSE_ROUTING === undefined && committedRoutingArm === 'magma')", "artifact_ref": "src/cli.ts:919-921" },
+        { "claim": "the only archived live evidence is a measured NULL", "quoted_output": "VERDICT: no candidate arm certifies a win vs the incumbent at any swept lambda => measured NULL (incumbent hybrid stands)", "artifact_ref": "docs/evidence/us1-cert-run-2026-07-06.log:45-53" }
+      ],
+      "controls": { "positive": false, "negative": false, "separation": 0 },
+      "blocked": null
+    },
+    {
+      "capability_id": "self_learning",
+      "state": "built",
+      "gap": "The accept-vs-waste loop is not closed live: settleHumanOutcomeForAttempt has 0 live callers and recordAttempt has 0 occurrences in src/. Missing: a live per-attempt settling caller, a default-on learned-policy consult, and a measured before/after outcome delta with controls.",
+      "backing_subsystems": ["src/memory/experience-store.ts", "src/memory/human-outcome.ts", "src/reward/kto-learner.ts", "src/reward/dr-estimator.ts", "src/memory/arm-router.ts", "src/suggest/outcome-writer.ts", "src/cli.ts"],
+      "evidence": [
+        { "claim": "per-attempt human-outcome API has 0 live callers (independently grep-verified)", "quoted_output": "settleHumanOutcomeForAttempt -> def (human-outcome.ts:86) + barrel (index.ts:133) only; recordAttempt -> count=0 in src/", "artifact_ref": "docs/evidence/audit/adversarial-verification.md" },
+        { "claim": "live CLI logs retrievals but never calls per-attempt settling", "quoted_output": "const loggedId = logRetrievalExperience(experienceStore, { ... })", "artifact_ref": "src/cli.ts:996-1030" },
+        { "claim": "learner is offline / SELECT-only", "quoted_output": "this package has NO import path to the judge... and NO write path to the experience store (SELECT-only)", "artifact_ref": "src/reward/kto-learner.ts:21-25" }
+      ],
+      "controls": { "positive": false, "negative": false, "separation": 0 },
+      "blocked": null
+    },
+    {
+      "capability_id": "self_direction",
+      "state": "built",
+      "gap": "Largest gap: no machine-aware scheduler and no new-app self-direction. Ideation is deterministic + SCNS-scoped seed menus; scheduling is context-threshold rotation only; src/autonomy is a single thin file. Missing: autonomous target discovery across arbitrary apps, a machine-limit scheduler, and a live observe->decide->schedule->act loop.",
+      "backing_subsystems": ["src/autonomy/index.ts (1 file)", "src/brain", "src/suggest", "src/ideate", "src/selfopt", "src/observe", "src/meta-broker"],
+      "evidence": [
+        { "claim": "src/autonomy is a single thin file", "quoted_output": "ls src/autonomy => index.ts", "artifact_ref": "src/autonomy/index.ts" },
+        { "claim": "self-improvement is gated on the SCNS repo itself", "quoted_output": "const SCNS_REPO_RE = /(^|[/\\\\])scns$/i", "artifact_ref": "src/suggest/extractors/self-improvement-extractor.ts:17-18" },
+        { "claim": "scheduling is context-threshold rotation, not machine limits", "quoted_output": "return state.contextUsagePercent >= state.contextRotationThreshold", "artifact_ref": "src/brain/decision-tree.ts:67-69" }
+      ],
+      "controls": { "positive": false, "negative": false, "separation": 0 },
+      "blocked": { "missing_precondition": "no self-direction mechanism exists to point at a new arbitrary app; a live probe cannot show the effect (Validity-of-Null)", "could_setup_show_win": false }
+    },
+    {
+      "capability_id": "voice_cloning",
+      "state": "specified",
+      "gap": "Essentially unbuilt: no voice/persona subsystem, no texts ingestion (grep imessage/sms => 0), no persona-scoped contact model (grep 'approved/persona contact' => 0). Missing: texts ingestion, voice-feature extraction, a persona-contact policy distinct from the safety allowlist, persona-faithful agent generation, and a faithfulness measure.",
+      "backing_subsystems": ["(none dedicated)", "src/suggest/artifact-generators.ts", "src/broker/services/safety-kernel"],
+      "evidence": [
+        { "claim": "no texts ingestion for voice modeling", "quoted_output": "grep -rin 'imessage|sms' src => 0 matches", "artifact_ref": "docs/evidence/audit/voice_cloning.md" },
+        { "claim": "no persona-scoped approved-contact model", "quoted_output": "grep -rin 'approved contact|persona contact' src => 0 matches", "artifact_ref": "docs/evidence/audit/voice_cloning.md" },
+        { "claim": "only generic skill scaffolding exists", "quoted_output": "This skill can be invoked to automate the described pattern.", "artifact_ref": "src/suggest/artifact-generators.ts:234-272" }
+      ],
+      "controls": { "positive": false, "negative": false, "separation": 0 },
+      "blocked": { "missing_precondition": "no voice/persona subsystem, texts-ingestion, or persona-contact model exists; nothing to probe (Validity-of-Null)", "could_setup_show_win": false }
+    },
+    {
+      "capability_id": "safe_outward",
+      "state": "measured_with_controls",
+      "gap": "Closest to usable: deny-all/fail-closed guardrail wired into live broker startup with passing pos/neg controlled tests. NOT usable only because no archived LIVE end-to-end deny-all row exists in-repo (a runtime broker probe is deferred: broker :3456 must stay untouched in this MVP). The smallest remaining step to usable is a single guarded live deny-all probe with an archived row.",
+      "backing_subsystems": ["src/broker/services/safety-kernel/kernel-allowlist.ts", "src/broker/services/safety-kernel/kernel-policy.ts", "src/broker/services/outward/consult-source.ts", "src/broker/services/outward/ask-human.ts", "src/broker/startup.ts", "config/safety-allowlist.json"],
+      "evidence": [
+        { "claim": "deny-all / fail-closed allowlist ships empty (human-owned)", "quoted_output": "WS-0 Immutable Safety Kernel allowlist. HUMAN-OWNED. Ships EMPTY = deny-all egress + deny-all spend", "artifact_ref": "config/safety-allowlist.json:3-5" },
+        { "claim": "guard wired into live broker startup", "quoted_output": "allowlist: loadAllowlist(SAFETY_ALLOWLIST_PATH)", "artifact_ref": "src/broker/startup.ts:313-315" },
+        { "claim": "positive+negative controls: allowlisted host allowed, off-list refused + fetch never fires", "quoted_output": "consult-source.test.ts: allowlisted host allowed+audited (37-47); off-list refused, fetch never fires, malformed refused (49-87)", "artifact_ref": "test/unit/broker/services/outward/consult-source.test.ts:37-87" }
+      ],
+      "controls": { "positive": true, "negative": true, "separation": 1.0 },
+      "blocked": null
+    }
+  ],
+  "cross_cutting_guards": {
+    "artifact": "docs/evidence/audit/guards.md",
+    "state": "measured_with_controls",
+    "note": "Sixth auditor (six-vs-five resolution). Core guards (vault RO, kill-by-PID, isolated home) proven with executed negative controls; broker/allowlist/lever invariants verified structurally this session."
+  },
+  "prioritized_gap_map": [
+    { "capability_id": "trustworthy_recall", "priority": 1, "missing_pieces": ["Alg-1 anchor-eviction return-contract fix", "Alg-3 causal-density restore", "LoCoMo reproduction/health gate before any comparison"], "blocks": ["trustworthy_recall -> measured_with_controls", "any faithful hybrid-vs-magma verdict"] },
+    { "capability_id": "self_learning", "priority": 2, "missing_pieces": ["live per-attempt settling caller", "default-on learned-policy consult on the live query path", "measured before/after outcome delta with controls"], "blocks": ["self_learning -> wired_live/measured", "the accept-vs-waste north-star loop"] },
+    { "capability_id": "self_direction", "priority": 3, "missing_pieces": ["machine-limit-aware scheduler", "autonomous target discovery beyond SCNS-scoped seeds", "live observe->decide->schedule->act loop over a new app"], "blocks": ["point-it-at-a-new-app-and-go autonomy"] },
+    { "capability_id": "voice_cloning", "priority": 4, "missing_pieces": ["texts/message-history ingestion", "voice/style feature extraction", "persona-scoped contact policy", "persona-faithful agent generation", "voice-faithfulness measure"], "blocks": ["a faithful voice-clone skill+agent"] },
+    { "capability_id": "safe_outward", "priority": 5, "missing_pieces": ["archived live end-to-end deny-all row via a guarded runtime broker probe"], "blocks": ["safe_outward -> usable (hardening only)"] }
+  ],
+  "magma_placement": "Priority 1. The MAGMA corrective remediation (US2 of this spec) is the immediate next work: it moves trustworthy_recall from built -> measured_with_controls and is the precondition for any trustworthy hybrid-vs-magma verdict. It is a scoped fix behind default-OFF levers, not a moonshot.",
+  "distance_summary": "SCNS is NOT yet usable at the north star on ANY of the five capabilities. safe_outward is closest (measured_with_controls: deny-all + fail-closed, wired-live, pos/neg controlled tests) but lacks an archived live e2e row. trustworthy_recall and self_learning are built but not wired-live/measured (the faithful MAGMA path is default-OFF with only a measured NULL; the per-attempt accept-vs-waste loop has 0 live callers). self_direction is built as deterministic, SCNS-scoped heuristics with no machine-aware scheduler and no new-app self-direction (BLOCKED). voice_cloning is only specified -- no persona/voice subsystem, no texts ingestion (BLOCKED). The honest distance: the safety substrate is strong, memory recall is one scoped fix (US2/MAGMA) from being measurable, self-learning needs live loop-closure, and the two headline autonomy moonshots (self-direction, voice-cloning) are largely unbuilt downstream work."
+}

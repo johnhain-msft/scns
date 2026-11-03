@@ -1,0 +1,112 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  P0.4 (2026-05-19): weekly soak harness.
+
+  Runs scripts/auto-restart-soak.mjs every Sunday at 03:00 local time on a
+  sidecar broker (port 34567, NOT the production 3456). The soak script
+  itself exits non-zero on any of the documented regressions:
+
+    rss_mb > 1500            (memory leak)
+    spawns/min > 20          (respawn storm)
+    event_loop_p99_ms > 500  (event-loop stall)
+
+  A non-zero exit lands in StandardErrorPath + becomes visible via:
+
+    launchctl list com.scns.soak-weekly
+    tail ~/.scns/logs/soak-weekly-stderr.log
+
+  Evidence CSV + JSON summary are written by the script itself to:
+
+    out/auto-restart-soak-<ISO_TS>.csv
+    docs/evidence/auto-restart-soak-<ISO_TS>.json
+
+  Installation:
+
+    cp scripts/com.scns.soak-weekly.plist ~/Library/LaunchAgents/
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.scns.soak-weekly.plist
+
+  Manual trigger (e.g., to verify after install):
+
+    launchctl kickstart -k gui/$(id -u)/com.scns.soak-weekly
+
+  Uninstall:
+
+    launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.scns.soak-weekly.plist
+    rm ~/Library/LaunchAgents/com.scns.soak-weekly.plist
+-->
+<plist version="1.0">
+<!--
+  TEMPLATE - macOS launchd. Substitute before `launchctl load`:
+    __HOME__          your home directory, e.g. /Users/you
+    __SCNS_REPO__     absolute path to this SCNS clone
+    __NODE_BIN_DIR__  directory holding the Node 20 binary (SCNS requires Node 20 - see README)
+  launchd does NOT expand `~` or environment variables in these strings, so an
+  unsubstituted placeholder fails loudly instead of silently resolving somewhere wrong.
+-->
+<dict>
+    <key>Label</key>
+    <string>com.scns.soak-weekly</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>__NODE_BIN_DIR__/node</string>
+        <string>__SCNS_REPO__/scripts/auto-restart-soak.mjs</string>
+        <string>--duration-sec</string>
+        <string>1800</string>
+        <string>--restart-sec</string>
+        <string>600</string>
+        <string>--cap</string>
+        <string>4</string>
+        <string>--port</string>
+        <string>34567</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>__SCNS_REPO__</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>__NODE_BIN_DIR__:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <key>HOME</key>
+        <string>__HOME__</string>
+        <key>NODE_ENV</key>
+        <string>production</string>
+    </dict>
+
+    <!-- Weekly: Sunday 03:00 local. Quiet window, no overlap with the
+         06:00 daily-restart. 30-min soak with one mid-run broker
+         restart (10 min in) exercises blue/green within the soak. -->
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Weekday</key>
+        <integer>0</integer>
+        <key>Hour</key>
+        <integer>3</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+
+    <key>StandardOutPath</key>
+    <string>__HOME__/.scns/logs/soak-weekly-stdout.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>__HOME__/.scns/logs/soak-weekly-stderr.log</string>
+
+    <!-- Do NOT keep alive — this is a scheduled batch, not a daemon. -->
+    <key>RunAtLoad</key>
+    <false/>
+
+    <key>KeepAlive</key>
+    <false/>
+
+    <!-- Cap CPU/IO impact so a runaway soak can't starve the production
+         broker. macOS-specific; safe to omit on other platforms. -->
+    <key>ProcessType</key>
+    <string>Background</string>
+
+    <key>Nice</key>
+    <integer>5</integer>
+</dict>
+</plist>

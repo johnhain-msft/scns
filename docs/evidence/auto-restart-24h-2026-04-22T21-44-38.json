@@ -1,0 +1,52 @@
+{
+  "label": "auto-restart soak (accelerated 4h / 2h restart interval)",
+  "rationale": "User-approved accelerated soak (see plan.md \u00a7Stopping criteria). If ambiguous, escalate to 24h.",
+  "started_at": "2026-04-22T21-44-38",
+  "duration_sec": 1800,
+  "restart_interval_sec": 900,
+  "sandbox_home": "/tmp/scns-smoke/soak-2026-04-22T21-44-38/home",
+  "port": 4560,
+  "plist_label": "com.scns.soak",
+  "cycles_run": 2,
+  "cycles_reached_phase7": 2,
+  "reset_embedding_client_fires": 1,
+  "cpp_aborts": 1,
+  "phase7_healthy_lines": 2,
+  "final_metrics": {
+    "timestampMs": 1776910506833,
+    "uptimeSec": 574,
+    "memory": {
+      "rssMb": 86.57,
+      "heapUsedMb": 29.58,
+      "externalMb": 3.7
+    },
+    "eventLoop": {
+      "meanMs": 51.61,
+      "p50Ms": 52.1,
+      "p99Ms": 52.17,
+      "maxMs": 52.2
+    },
+    "spawner": {
+      "activeCount": 0,
+      "maxConcurrent": 2,
+      "spawnsLast60s": 0,
+      "pendingCount": 0
+    }
+  },
+  "summary": {
+    "samples": 121,
+    "rss_mb_min": 80.51,
+    "rss_mb_max": 961.04,
+    "rss_mb_p50": 85.61,
+    "rss_mb_end": 86.57,
+    "external_mb_min": 3.58,
+    "external_mb_max": 34.26,
+    "external_mb_end": 3.64,
+    "evloop_p99_ms_max": 1518.34,
+    "evloop_p99_ms_p99": 52.76
+  },
+  "real_home_untouched": true,
+  "metrics_csv": "/tmp/scns-smoke/soak-2026-04-22T21-44-38/metrics.csv",
+  "broker_error_log": "/tmp/scns-smoke/soak-2026-04-22T21-44-38/home/.scns/logs/broker_error.log",
+  "restart_log": "/tmp/scns-smoke/soak-2026-04-22T21-44-38/home/.scns/logs/restart.log"
+}

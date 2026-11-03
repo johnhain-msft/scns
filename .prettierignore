@@ -1,0 +1,5 @@
+dist/
+coverage/
+references/
+node_modules/
+*.md

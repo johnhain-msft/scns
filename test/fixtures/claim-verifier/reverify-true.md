@@ -1,0 +1,1 @@
+The `createWatchdogDaemon` rotation watchdog is unwired dead code — it has no caller in src/ [code-only]. Verified with `grep -rn createWatchdogDaemon src/`: only the definition (rotation-watchdog.ts) and a re-export (index.ts), no invocation.

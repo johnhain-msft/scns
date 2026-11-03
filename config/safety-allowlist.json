@@ -1,0 +1,6 @@
+{
+  "version": 1,
+  "_comment": "WS-0 Immutable Safety Kernel allowlist. HUMAN-OWNED. Ships EMPTY = deny-all egress + deny-all spend. Populating this file is a deferred human decision; do NOT let any agent add entries. This file is non-self-editable: the safety kernel + auto-merger + QG arbiter REJECT any diff that touches it (changes require human approval). 'hosts' = approved egress hostnames; 'spendApis' = approved paid-API hostnames.",
+  "hosts": [],
+  "spendApis": []
+}

@@ -1,0 +1,919 @@
+[
+  {
+    "i": 0,
+    "in": {
+      "enabled": true,
+      "humanAuthored": true,
+      "incumbent": "magma",
+      "epsilon": 0.5,
+      "explorations24h": 0,
+      "processCount": 0
+    },
+    "out": {
+      "servedArm": "magma",
+      "explore": false,
+      "record": true,
+      "propensity": 0.5,
+      "epsilon": 0.5,
+      "boundHit": false
+    }
+  },
+  {
+    "i": 1,
+    "in": {
+      "enabled": true,
+      "humanAuthored": true,
+      "incumbent": "hybrid",
+      "epsilon": 0.1,
+      "explorations24h": 1,
+      "processCount": 0
+    },
+    "out": {
+      "servedArm": "multihop-iter",
+      "explore": true,
+      "record": true,
+      "propensity": 0.1,
+      "epsilon": 0.1,
+      "boundHit": false
+    }
+  },
+  {
+    "i": 2,
+    "in": {
+      "enabled": true,
+      "humanAuthored": true,
+      "incumbent": "magma",
+      "epsilon": 0,
+      "explorations24h": 2,
+      "processCount": 0
+    },
+    "out": {
+      "servedArm": "magma",
+      "explore": false,
+      "record": true,
+      "propensity": 1,
+      "epsilon": 0,
+      "boundHit": false
+    }
+  },
+  {
+    "i": 3,
+    "in": {
+      "enabled": true,
+      "humanAuthored": false,
+      "incumbent": "hybrid",
+      "epsilon": 0.5,
+      "explorations24h": 0,
+      "processCount": 0
+    },
+    "out": {
+      "servedArm": "hybrid",
+      "explore": false,
+      "record": false,
+      "boundHit": false
+    }
+  },
+  {
+    "i": 4,
+    "in": {
+      "enabled": true,
+      "humanAuthored": true,
+      "incumbent": "magma",
+      "epsilon": 0.1,
+      "explorations24h": 1,
+      "processCount": 0
+    },
+    "out": {
+      "servedArm": "magma",
+      "explore": false,
+      "record": true,
+      "propensity": 0.9,
+      "epsilon": 0.1,
+      "boundHit": false
+    }
+  },
+  {
+    "i": 5,
+    "in": {
+      "enabled": true,
+      "humanAuthored": true,
+      "incumbent": "hybrid",
+      "epsilon": 0,
+      "explorations24h": 2,
+      "processCount": 0
+    },
+    "out": {
+      "servedArm": "hybrid",
+      "explore": false,
+      "record": true,
+      "propensity": 1,
+      "epsilon": 0,
+      "boundHit": false
+    }
+  },
+  {
+    "i": 6,
+    "in": {
+      "enabled": false,
+      "humanAuthored": true,
+      "incumbent": "magma",
+      "epsilon": 0.5,
+      "explorations24h": 0,
+      "processCount": 0
+    },
+    "out": {
+      "servedArm": "magma",
+      "explore": false,
+      "record": false,
+      "boundHit": false
+    }
+  },
+  {
+    "i": 7,
+    "in": {
+      "enabled": true,
+      "humanAuthored": true,
+      "incumbent": "hybrid",
+      "epsilon": 0.1,
+      "explorations24h": 1,
+      "processCount": 0
+    },
+    "out": {
+      "servedArm": "multihop-iter",
+      "explore": true,
+      "record": true,
+      "propensity": 0.1,
+      "epsilon": 0.1,
+      "boundHit": false
+    }
+  },
+  {
+    "i": 8,
+    "in": {
+      "enabled": true,
+      "humanAuthored": false,
+      "incumbent": "magma",
+      "epsilon": 0,
+      "explorations24h": 2,
+      "processCount": 0
+    },
+    "out": {
+      "servedArm": "magma",
+      "explore": false,
+      "record": false,
+      "boundHit": false
+    }
+  },
+  {
+    "i": 9,
+    "in": {
+      "enabled": true,
+      "humanAuthored": true,
+      "incumbent": "hybrid",
+      "epsilon": 0.5,
+      "explorations24h": 0,
+      "processCount": 0
+    },
+    "out": {
+      "servedArm": "multihop-iter",
+      "explore": true,
+      "record": true,
+      "propensity": 0.5,
+      "epsilon": 0.5,
+      "boundHit": false
+    }
+  },
+  {
+    "i": 10,
+    "in": {
+      "enabled": true,
+      "humanAuthored": true,
+      "incumbent": "magma",
+      "epsilon": 0.1,
+      "explorations24h": 20,
+      "processCount": 0
+    },
+    "out": {
+      "servedArm": "magma",
+      "explore": false,
+      "record": true,
+      "propensity": 1,
+      "epsilon": 0.1,
+      "boundHit": true
+    }
+  },
+  {
+    "i": 11,
+    "in": {
+      "enabled": true,
+      "humanAuthored": true,
+      "incumbent": "hybrid",
+      "epsilon": 0,
+      "explorations24h": 2,
+      "processCount": 0
+    },
+    "out": {
+      "servedArm": "hybrid",
+      "explore": false,
+      "record": true,
+      "propensity": 1,
+      "epsilon": 0,
+      "boundHit": false
+    }
+  },
+  {
+    "i": 12,
+    "in": {
+      "enabled": true,
+      "humanAuthored": true,
+      "incumbent": "magma",
+      "epsilon": 0.5,
+      "explorations24h": 0,
+      "processCount": 20
+    },
+    "out": {
+      "servedArm": "magma",
+      "explore": false,
+      "record": true,
+      "propensity": 1,
+      "epsilon": 0.5,
+      "boundHit": true
+    }
+  },
+  {
+    "i": 13,
+    "in": {
+      "enabled": false,
+      "humanAuthored": false,
+      "incumbent": "hybrid",
+      "epsilon": 0.1,
+      "explorations24h": 1,
+      "processCount": 0
+    },
+    "out": {
+      "servedArm": "hybrid",
+      "explore": false,
+      "record": false,
+      "boundHit": false
+    }
+  },
+  {
+    "i": 14,
+    "in": {
+      "enabled": true,
+      "humanAuthored": true,
+      "incumbent": "magma",
+      "epsilon": 0,
+      "explorations24h": 2,
+      "processCount": 0
+    },
+    "out": {
+      "servedArm": "magma",
+      "explore": false,
+      "record": true,
+      "propensity": 1,
+      "epsilon": 0,
+      "boundHit": false
+    }
+  },
+  {
+    "i": 15,
+    "in": {
+      "enabled": true,
+      "humanAuthored": true,
+      "incumbent": "hybrid",
+      "epsilon": 0.5,
+      "explorations24h": 0,
+      "processCount": 0
+    },
+    "out": {
+      "servedArm": "hybrid",
+      "explore": false,
+      "record": true,
+      "propensity": 0.5,
+      "epsilon": 0.5,
+      "boundHit": false
+    }
+  },
+  {
+    "i": 16,
+    "in": {
+      "enabled": true,
+      "humanAuthored": true,
+      "incumbent": "magma",
+      "epsilon": 0.1,
+      "explorations24h": 1,
+      "processCount": 0
+    },
+    "out": {
+      "servedArm": "magma",
+      "explore": false,
+      "record": true,
+      "propensity": 0.9,
+      "epsilon": 0.1,
+      "boundHit": false
+    }
+  },
+  {
+    "i": 17,
+    "in": {
+      "enabled": true,
+      "humanAuthored": true,
+      "incumbent": "hybrid",
+      "epsilon": 0,
+      "explorations24h": 2,
+      "processCount": 0
+    },
+    "out": {
+      "servedArm": "hybrid",
+      "explore": false,
+      "record": true,
+      "propensity": 1,
+      "epsilon": 0,
+      "boundHit": false
+    }
+  },
+  {
+    "i": 18,
+    "in": {
+      "enabled": true,
+      "humanAuthored": false,
+      "incumbent": "magma",
+      "epsilon": 0.5,
+      "explorations24h": 0,
+      "processCount": 0
+    },
+    "out": {
+      "servedArm": "magma",
+      "explore": false,
+      "record": false,
+      "boundHit": false
+    }
+  },
+  {
+    "i": 19,
+    "in": {
+      "enabled": true,
+      "humanAuthored": true,
+      "incumbent": "hybrid",
+      "epsilon": 0.1,
+      "explorations24h": 1,
+      "processCount": 0
+    },
+    "out": {
+      "servedArm": "hybrid",
+      "explore": false,
+      "record": true,
+      "propensity": 0.9,
+      "epsilon": 0.1,
+      "boundHit": false
+    }
+  },
+  {
+    "i": 20,
+    "in": {
+      "enabled": false,
+      "humanAuthored": true,
+      "incumbent": "magma",
+      "epsilon": 0,
+      "explorations24h": 2,
+      "processCount": 0
+    },
+    "out": {
+      "servedArm": "magma",
+      "explore": false,
+      "record": false,
+      "boundHit": false
+    }
+  },
+  {
+    "i": 21,
+    "in": {
+      "enabled": true,
+      "humanAuthored": true,
+      "incumbent": "hybrid",
+      "epsilon": 0.5,
+      "explorations24h": 20,
+      "processCount": 0
+    },
+    "out": {
+      "servedArm": "hybrid",
+      "explore": false,
+      "record": true,
+      "propensity": 1,
+      "epsilon": 0.5,
+      "boundHit": true
+    }
+  },
+  {
+    "i": 22,
+    "in": {
+      "enabled": true,
+      "humanAuthored": true,
+      "incumbent": "magma",
+      "epsilon": 0.1,
+      "explorations24h": 1,
+      "processCount": 0
+    },
+    "out": {
+      "servedArm": "magma",
+      "explore": false,
+      "record": true,
+      "propensity": 0.9,
+      "epsilon": 0.1,
+      "boundHit": false
+    }
+  },
+  {
+    "i": 23,
+    "in": {
+      "enabled": true,
+      "humanAuthored": false,
+      "incumbent": "hybrid",
+      "epsilon": 0,
+      "explorations24h": 2,
+      "processCount": 0
+    },
+    "out": {
+      "servedArm": "hybrid",
+      "explore": false,
+      "record": false,
+      "boundHit": false
+    }
+  },
+  {
+    "i": 24,
+    "in": {
+      "enabled": true,
+      "humanAuthored": true,
+      "incumbent": "magma",
+      "epsilon": 0.5,
+      "explorations24h": 0,
+      "processCount": 0
+    },
+    "out": {
+      "servedArm": "multihop-iter",
+      "explore": true,
+      "record": true,
+      "propensity": 0.5,
+      "epsilon": 0.5,
+      "boundHit": false
+    }
+  },
+  {
+    "i": 25,
+    "in": {
+      "enabled": true,
+      "humanAuthored": true,
+      "incumbent": "hybrid",
+      "epsilon": 0.1,
+      "explorations24h": 1,
+      "processCount": 20
+    },
+    "out": {
+      "servedArm": "hybrid",
+      "explore": false,
+      "record": true,
+      "propensity": 1,
+      "epsilon": 0.1,
+      "boundHit": true
+    }
+  },
+  {
+    "i": 26,
+    "in": {
+      "enabled": true,
+      "humanAuthored": true,
+      "incumbent": "magma",
+      "epsilon": 0,
+      "explorations24h": 2,
+      "processCount": 0
+    },
+    "out": {
+      "servedArm": "magma",
+      "explore": false,
+      "record": true,
+      "propensity": 1,
+      "epsilon": 0,
+      "boundHit": false
+    }
+  },
+  {
+    "i": 27,
+    "in": {
+      "enabled": false,
+      "humanAuthored": true,
+      "incumbent": "hybrid",
+      "epsilon": 0.5,
+      "explorations24h": 0,
+      "processCount": 0
+    },
+    "out": {
+      "servedArm": "hybrid",
+      "explore": false,
+      "record": false,
+      "boundHit": false
+    }
+  },
+  {
+    "i": 28,
+    "in": {
+      "enabled": true,
+      "humanAuthored": false,
+      "incumbent": "magma",
+      "epsilon": 0.1,
+      "explorations24h": 1,
+      "processCount": 0
+    },
+    "out": {
+      "servedArm": "magma",
+      "explore": false,
+      "record": false,
+      "boundHit": false
+    }
+  },
+  {
+    "i": 29,
+    "in": {
+      "enabled": true,
+      "humanAuthored": true,
+      "incumbent": "hybrid",
+      "epsilon": 0,
+      "explorations24h": 2,
+      "processCount": 0
+    },
+    "out": {
+      "servedArm": "hybrid",
+      "explore": false,
+      "record": true,
+      "propensity": 1,
+      "epsilon": 0,
+      "boundHit": false
+    }
+  },
+  {
+    "i": 30,
+    "in": {
+      "enabled": true,
+      "humanAuthored": true,
+      "incumbent": "magma",
+      "epsilon": 0.5,
+      "explorations24h": 0,
+      "processCount": 0
+    },
+    "out": {
+      "servedArm": "magma",
+      "explore": false,
+      "record": true,
+      "propensity": 0.5,
+      "epsilon": 0.5,
+      "boundHit": false
+    }
+  },
+  {
+    "i": 31,
+    "in": {
+      "enabled": true,
+      "humanAuthored": true,
+      "incumbent": "hybrid",
+      "epsilon": 0.1,
+      "explorations24h": 1,
+      "processCount": 0
+    },
+    "out": {
+      "servedArm": "multihop-iter",
+      "explore": true,
+      "record": true,
+      "propensity": 0.1,
+      "epsilon": 0.1,
+      "boundHit": false
+    }
+  },
+  {
+    "i": 32,
+    "in": {
+      "enabled": true,
+      "humanAuthored": true,
+      "incumbent": "magma",
+      "epsilon": 0,
+      "explorations24h": 20,
+      "processCount": 0
+    },
+    "out": {
+      "servedArm": "magma",
+      "explore": false,
+      "record": true,
+      "propensity": 1,
+      "epsilon": 0,
+      "boundHit": true
+    }
+  },
+  {
+    "i": 33,
+    "in": {
+      "enabled": true,
+      "humanAuthored": false,
+      "incumbent": "hybrid",
+      "epsilon": 0.5,
+      "explorations24h": 0,
+      "processCount": 0
+    },
+    "out": {
+      "servedArm": "hybrid",
+      "explore": false,
+      "record": false,
+      "boundHit": false
+    }
+  },
+  {
+    "i": 34,
+    "in": {
+      "enabled": false,
+      "humanAuthored": true,
+      "incumbent": "magma",
+      "epsilon": 0.1,
+      "explorations24h": 1,
+      "processCount": 0
+    },
+    "out": {
+      "servedArm": "magma",
+      "explore": false,
+      "record": false,
+      "boundHit": false
+    }
+  },
+  {
+    "i": 35,
+    "in": {
+      "enabled": true,
+      "humanAuthored": true,
+      "incumbent": "hybrid",
+      "epsilon": 0,
+      "explorations24h": 2,
+      "processCount": 0
+    },
+    "out": {
+      "servedArm": "hybrid",
+      "explore": false,
+      "record": true,
+      "propensity": 1,
+      "epsilon": 0,
+      "boundHit": false
+    }
+  },
+  {
+    "i": 36,
+    "in": {
+      "enabled": true,
+      "humanAuthored": true,
+      "incumbent": "magma",
+      "epsilon": 0.5,
+      "explorations24h": 0,
+      "processCount": 0
+    },
+    "out": {
+      "servedArm": "magma",
+      "explore": false,
+      "record": true,
+      "propensity": 0.5,
+      "epsilon": 0.5,
+      "boundHit": false
+    }
+  },
+  {
+    "i": 37,
+    "in": {
+      "enabled": true,
+      "humanAuthored": true,
+      "incumbent": "hybrid",
+      "epsilon": 0.1,
+      "explorations24h": 1,
+      "processCount": 0
+    },
+    "out": {
+      "servedArm": "hybrid",
+      "explore": false,
+      "record": true,
+      "propensity": 0.9,
+      "epsilon": 0.1,
+      "boundHit": false
+    }
+  },
+  {
+    "i": 38,
+    "in": {
+      "enabled": true,
+      "humanAuthored": false,
+      "incumbent": "magma",
+      "epsilon": 0,
+      "explorations24h": 2,
+      "processCount": 20
+    },
+    "out": {
+      "servedArm": "magma",
+      "explore": false,
+      "record": false,
+      "boundHit": false
+    }
+  },
+  {
+    "i": 39,
+    "in": {
+      "enabled": true,
+      "humanAuthored": true,
+      "incumbent": "hybrid",
+      "epsilon": 0.5,
+      "explorations24h": 0,
+      "processCount": 0
+    },
+    "out": {
+      "servedArm": "hybrid",
+      "explore": false,
+      "record": true,
+      "propensity": 0.5,
+      "epsilon": 0.5,
+      "boundHit": false
+    }
+  },
+  {
+    "i": 40,
+    "exploration": {
+      "explore": true,
+      "arm": "multihop-iter",
+      "propensity": 0.5,
+      "boundHit": false
+    }
+  },
+  {
+    "i": 41,
+    "exploration": {
+      "explore": true,
+      "arm": "multihop-iter",
+      "propensity": 0.5,
+      "boundHit": false
+    }
+  },
+  {
+    "i": 42,
+    "exploration": {
+      "explore": false,
+      "propensity": 0.5,
+      "boundHit": false
+    }
+  },
+  {
+    "i": 43,
+    "exploration": {
+      "explore": false,
+      "propensity": 0.5,
+      "boundHit": false
+    }
+  },
+  {
+    "i": 44,
+    "exploration": {
+      "explore": false,
+      "propensity": 0.5,
+      "boundHit": false
+    }
+  },
+  {
+    "i": 45,
+    "exploration": {
+      "explore": true,
+      "arm": "multihop-iter",
+      "propensity": 0.5,
+      "boundHit": false
+    }
+  },
+  {
+    "i": 46,
+    "exploration": {
+      "explore": false,
+      "propensity": 0.5,
+      "boundHit": false
+    }
+  },
+  {
+    "i": 47,
+    "exploration": {
+      "explore": true,
+      "arm": "multihop-iter",
+      "propensity": 0.5,
+      "boundHit": false
+    }
+  },
+  {
+    "i": 48,
+    "exploration": {
+      "explore": false,
+      "propensity": 0.5,
+      "boundHit": false
+    }
+  },
+  {
+    "i": 49,
+    "exploration": {
+      "explore": true,
+      "arm": "multihop-iter",
+      "propensity": 0.5,
+      "boundHit": false
+    }
+  },
+  {
+    "i": 50,
+    "exploration": {
+      "explore": true,
+      "arm": "multihop-iter",
+      "propensity": 0.5,
+      "boundHit": false
+    }
+  },
+  {
+    "i": 51,
+    "exploration": {
+      "explore": true,
+      "arm": "multihop-iter",
+      "propensity": 0.5,
+      "boundHit": false
+    }
+  },
+  {
+    "i": 52,
+    "exploration": {
+      "explore": true,
+      "arm": "multihop-iter",
+      "propensity": 0.5,
+      "boundHit": false
+    }
+  },
+  {
+    "i": 53,
+    "exploration": {
+      "explore": true,
+      "arm": "multihop-iter",
+      "propensity": 0.5,
+      "boundHit": false
+    }
+  },
+  {
+    "i": 54,
+    "exploration": {
+      "explore": true,
+      "arm": "multihop-iter",
+      "propensity": 0.5,
+      "boundHit": false
+    }
+  },
+  {
+    "i": 55,
+    "exploration": {
+      "explore": true,
+      "arm": "multihop-iter",
+      "propensity": 0.5,
+      "boundHit": false
+    }
+  },
+  {
+    "i": 56,
+    "exploration": {
+      "explore": false,
+      "propensity": 0.5,
+      "boundHit": false
+    }
+  },
+  {
+    "i": 57,
+    "exploration": {
+      "explore": true,
+      "arm": "multihop-iter",
+      "propensity": 0.5,
+      "boundHit": false
+    }
+  },
+  {
+    "i": 58,
+    "exploration": {
+      "explore": true,
+      "arm": "multihop-iter",
+      "propensity": 0.5,
+      "boundHit": false
+    }
+  },
+  {
+    "i": 59,
+    "exploration": {
+      "explore": false,
+      "propensity": 0.5,
+      "boundHit": false
+    }
+  },
+  {
+    "epsilons": [
+      0.5,
+      0.1,
+      0.5,
+      0.5
+    ]
+  }
+]

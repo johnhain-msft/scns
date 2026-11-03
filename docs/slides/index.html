@@ -1,0 +1,757 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧠</text></svg>">
+<title>SCNS — Second Central Nervous System</title>
+<style>
+  /* ============================================================
+     SCNS slide deck — self-contained, offline, keyboard-driven.
+     Color is semantic and held constant through every diagram:
+       gold  = a memory (stored knowledge)
+       cyan  = the live session / the query
+       rust  = filtered out / rejected / pruned
+     ============================================================ */
+  :root {
+    --ink:    #0d1319;   /* background: slate night           */
+    --panel:  #151d27;   /* cards and diagram panels          */
+    --panel2: #1a2432;
+    --line:   #28333f;   /* hairlines                         */
+    --text:   #eae5d9;   /* warm paper                        */
+    --muted:  #8d97a5;
+    --mem:    #e3a93f;   /* gold — memory                     */
+    --mem-dim: rgba(227,169,63,.13);
+    --query:  #5cc8d7;   /* cyan — live session / query       */
+    --query-dim: rgba(92,200,215,.12);
+    --reject: #c25c4b;   /* rust — filtered / pruned          */
+    --reject-dim: rgba(194,92,75,.14);
+    --display: "Avenir Next", "Avenir", "Futura", "Segoe UI", system-ui, sans-serif;
+    --body: "Charter", "Iowan Old Style", "Georgia", serif;
+    --mono: "SF Mono", "Menlo", "Consolas", "Liberation Mono", monospace;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: var(--ink);
+    color: var(--text);
+    font-family: var(--body);
+    overflow: hidden;
+  }
+
+  /* ---------- deck chrome ---------- */
+  .deck { position: fixed; inset: 0; }
+  .slide {
+    position: absolute; inset: 0;
+    display: none;
+    flex-direction: column;
+    padding: clamp(28px, 5vh, 56px) clamp(28px, 6vw, 96px) clamp(64px, 9vh, 88px);
+    overflow-y: auto;
+  }
+  .slide.active { display: flex; animation: rise .45s ease both; }
+  @keyframes rise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+  @media (prefers-reduced-motion: reduce) { .slide.active { animation: none; } }
+
+  .eyebrow,
+  .slide[data-eyebrow]::before {
+    font-family: var(--mono);
+    font-size: clamp(11px, 1.3vw, 14px);
+    letter-spacing: .22em;
+    color: var(--mem);
+    margin-bottom: clamp(10px, 2vh, 22px);
+  }
+  .slide[data-eyebrow]::before { content: attr(data-eyebrow); display: block; flex: 0 0 auto; }
+  h1 {
+    font-family: var(--display);
+    font-weight: 700;
+    font-size: clamp(26px, 4.2vw, 52px);
+    line-height: 1.08;
+    letter-spacing: -0.015em;
+    margin-bottom: clamp(14px, 2.6vh, 26px);
+    max-width: 22em;
+  }
+  .lead {
+    font-size: clamp(16px, 1.75vw, 22px);
+    line-height: 1.55;
+    color: var(--text);
+    max-width: 46em;
+    margin-bottom: clamp(16px, 3vh, 30px);
+  }
+  .lead em { color: var(--mem); font-style: normal; }
+  .muted { color: var(--muted); }
+  .small { font-size: clamp(13px, 1.3vw, 16px); line-height: 1.55; color: var(--muted); }
+  code, .mono { font-family: var(--mono); font-size: .92em; }
+  code { color: var(--query); background: var(--panel); padding: .1em .35em; border-radius: 4px; }
+
+  .footer {
+    position: fixed; left: 0; right: 0; bottom: 0;
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 10px clamp(28px, 6vw, 96px) 14px;
+    font-family: var(--mono); font-size: 12px; color: var(--muted);
+    pointer-events: none;
+  }
+  .footer .counter b { color: var(--mem); font-weight: 400; }
+  .progress {
+    position: fixed; left: 0; bottom: 0; height: 2px;
+    background: var(--mem); width: 0; transition: width .3s ease;
+  }
+  .navbtns { position: fixed; right: 16px; bottom: 34px; display: flex; gap: 8px; }
+  .navbtns button {
+    background: var(--panel); color: var(--muted); border: 1px solid var(--line);
+    font-family: var(--mono); font-size: 15px; width: 36px; height: 32px;
+    border-radius: 6px; cursor: pointer;
+  }
+  .navbtns button:hover { color: var(--text); border-color: var(--muted); }
+  .navbtns button:focus-visible { outline: 2px solid var(--query); outline-offset: 2px; }
+
+  /* ---------- layout helpers ---------- */
+  .cols { display: grid; gap: clamp(14px, 2vw, 28px); }
+  .cols-3 { grid-template-columns: repeat(3, 1fr); }
+  .cols-2 { grid-template-columns: repeat(2, 1fr); }
+  @media (max-width: 860px) { .cols-3, .cols-2 { grid-template-columns: 1fr; } }
+  .card {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+    padding: clamp(14px, 1.8vw, 22px);
+  }
+  .card h3 {
+    font-family: var(--display); font-weight: 600;
+    font-size: clamp(15px, 1.6vw, 19px); margin-bottom: .5em;
+  }
+  .card h3 .tag { font-family: var(--mono); font-size: .68em; color: var(--mem); letter-spacing: .14em; display: block; margin-bottom: .55em; }
+  .card p { font-size: clamp(13.5px, 1.35vw, 16.5px); line-height: 1.55; color: var(--muted); }
+  .card p strong { color: var(--text); font-weight: 600; }
+
+  .formula {
+    background: var(--panel); border: 1px solid var(--line); border-left: 3px solid var(--mem);
+    border-radius: 8px; padding: clamp(12px, 1.6vw, 18px) clamp(14px, 1.8vw, 22px);
+    font-family: var(--mono); font-size: clamp(13px, 1.5vw, 17px); line-height: 1.8;
+    color: var(--text); overflow-x: auto; white-space: pre;
+  }
+  .formula .c { color: var(--muted); }
+  .formula .g { color: var(--mem); }
+  .formula .q { color: var(--query); }
+
+  .legend { display: flex; gap: 22px; align-items: center; font-family: var(--mono); font-size: 12.5px; color: var(--muted); margin-top: 10px; flex-wrap: wrap; }
+  .legend span::before { content: ""; display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 7px; vertical-align: -1px; }
+  .legend .l-mem::before { background: var(--mem); }
+  .legend .l-query::before { background: var(--query); }
+  .legend .l-reject::before { background: var(--reject); }
+
+  .diagram { margin: clamp(10px, 2vh, 22px) 0 0; }
+  .diagram svg { width: 100%; height: auto; display: block; }
+  .caption { font-family: var(--mono); font-size: 12.5px; color: var(--muted); margin-top: 10px; }
+
+  /* SVG shared styles (SVG inherits page CSS) */
+  .d-box    { fill: var(--panel); stroke: var(--line); stroke-width: 1.5; rx: 8; }
+  .d-box2   { fill: var(--panel2); stroke: var(--line); stroke-width: 1.5; }
+  .d-mem    { fill: var(--mem-dim); stroke: var(--mem); stroke-width: 1.5; }
+  .d-query  { fill: var(--query-dim); stroke: var(--query); stroke-width: 1.5; }
+  .d-reject { fill: var(--reject-dim); stroke: var(--reject); stroke-width: 1.5; }
+  .d-t      { font-family: var(--mono); fill: var(--text); font-size: 13px; }
+  .d-tm     { font-family: var(--mono); fill: var(--muted); font-size: 11.5px; }
+  .d-tg     { font-family: var(--mono); fill: var(--mem); font-size: 12px; }
+  .d-tq     { font-family: var(--mono); fill: var(--query); font-size: 12px; }
+  .d-tr     { font-family: var(--mono); fill: var(--reject); font-size: 11.5px; }
+  .d-arrow  { stroke: var(--muted); stroke-width: 1.5; fill: none; marker-end: url(#arr); }
+  .d-arrow-g{ stroke: var(--mem); stroke-width: 2; fill: none; marker-end: url(#arrg); }
+  .d-arrow-r{ stroke: var(--reject); stroke-width: 1.5; stroke-dasharray: 4 4; fill: none; }
+  .d-edge   { stroke: var(--line); stroke-width: 1.5; fill: none; }
+  .d-hair   { stroke: var(--line); stroke-width: 1; }
+
+  /* title slide */
+  .title-slide { justify-content: center; }
+  .title-slide .brand {
+    font-family: var(--display); font-weight: 800;
+    font-size: clamp(72px, 14vw, 190px); letter-spacing: .06em; line-height: 1;
+    color: var(--text);
+  }
+  .title-slide .brand span { color: var(--mem); }
+  .title-slide .sub {
+    font-family: var(--mono); letter-spacing: .34em; font-size: clamp(12px, 1.6vw, 18px);
+    color: var(--query); margin: 18px 0 30px; text-transform: uppercase;
+  }
+  .title-slide .tagline { font-size: clamp(19px, 2.4vw, 30px); max-width: 30em; line-height: 1.45; }
+  .title-slide .hint { margin-top: 42px; font-family: var(--mono); font-size: 12.5px; color: var(--muted); }
+  .kbd { border: 1px solid var(--line); border-radius: 4px; padding: 1px 6px; background: var(--panel); font-family: var(--mono); }
+
+  .statgrid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 6px; }
+  @media (max-width: 900px) { .statgrid { grid-template-columns: repeat(2, 1fr); } }
+  .stat { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; }
+  .stat .n { font-family: var(--display); font-weight: 700; font-size: clamp(22px, 2.6vw, 34px); color: var(--mem); }
+  .stat .l { font-family: var(--mono); font-size: 11.5px; color: var(--muted); margin-top: 6px; line-height: 1.5; letter-spacing: .04em; }
+
+  .promptbox {
+    background: #0a0f14; border: 1px solid var(--line); border-radius: 10px;
+    font-family: var(--mono); font-size: clamp(12px, 1.3vw, 15px); line-height: 1.75;
+    padding: clamp(14px, 2vw, 24px); overflow-x: auto; white-space: pre-wrap;
+  }
+  .promptbox .u  { color: var(--query); }
+  .promptbox .h  { color: var(--mem); }
+  .promptbox .b  { color: var(--text); }
+  .promptbox .m  { color: var(--muted); }
+
+  .note {
+    border-left: 3px solid var(--query); background: var(--query-dim);
+    border-radius: 0 8px 8px 0; padding: 12px 16px;
+    font-size: clamp(13.5px, 1.4vw, 16.5px); line-height: 1.55; margin-top: clamp(12px, 2vh, 20px);
+    max-width: 62em;
+  }
+  .note.warn { border-left-color: var(--reject); background: var(--reject-dim); }
+  .note .mono { color: var(--query); }
+
+  table.facts { border-collapse: collapse; font-size: clamp(13px, 1.35vw, 16px); }
+  table.facts td { padding: 6px 18px 6px 0; vertical-align: top; line-height: 1.5; }
+  table.facts td:first-child { font-family: var(--mono); color: var(--mem); white-space: nowrap; }
+  table.facts td:last-child { color: var(--muted); }
+
+  @media print {
+    body { overflow: visible; }
+    .deck { position: static; }
+    .slide { display: flex !important; position: static; page-break-after: always; min-height: 100vh; }
+    .footer, .progress, .navbtns { display: none; }
+  }
+</style>
+</head>
+<body>
+<!-- Shared SVG defs: must live OUTSIDE the slides, because markers inside a
+     display:none slide do not render anywhere else in the document. -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#8d97a5"/></marker>
+    <marker id="arrg" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#e3a93f"/></marker>
+  </defs>
+</svg>
+<div class="deck" id="deck">
+
+<!-- ======================= 0 · TITLE ======================= -->
+<section class="slide title-slide">
+  <div class="brand">SC<span>NS</span></div>
+  <div class="sub">Second Central Nervous System</div>
+  <div class="tagline">A memory for your coding agent that <em style="color:var(--mem); font-style:normal">survives the session</em> — local, per-repository, built on SQLite.</div>
+  <div class="hint"><span class="kbd">→</span> advance &nbsp;·&nbsp; <span class="kbd">←</span> back &nbsp;·&nbsp; <span class="kbd">F</span> fullscreen</div>
+</section>
+
+<!-- ======================= 1 · THE PROBLEM ======================= -->
+<section class="slide" data-eyebrow="01 · THE PROBLEM">
+  <h1>Every session starts with amnesia.</h1>
+  <p class="lead">During a session, a coding agent learns real things: which command quietly breaks the build, why that one test is flaky, where the bodies are buried in your repo. The moment the session closes, <em>all of it is gone</em>. The next session re-learns it from zero — on your time and your tokens.</p>
+  <div class="diagram">
+    <svg viewBox="0 0 960 250" role="img" aria-label="Timeline of three sessions; knowledge rises during each session and drops to zero when it ends">
+      <line x1="40" y1="200" x2="920" y2="200" class="d-hair"/>
+      <!-- session boxes -->
+      <rect x="60"  y="60" width="220" height="140" class="d-query" rx="8" fill-opacity="0.35"/>
+      <rect x="360" y="60" width="220" height="140" class="d-query" rx="8" fill-opacity="0.35"/>
+      <rect x="660" y="60" width="220" height="140" class="d-query" rx="8" fill-opacity="0.35"/>
+      <text x="70"  y="52" class="d-tq">session · Mon</text>
+      <text x="370" y="52" class="d-tq">session · Tue</text>
+      <text x="670" y="52" class="d-tq">session · Wed</text>
+      <!-- knowledge sawtooth -->
+      <polyline points="60,195 130,150 200,120 280,95" class="d-arrow-g" marker-end="none"/>
+      <polyline points="280,95 282,195" stroke="#c25c4b" stroke-width="2" fill="none"/>
+      <polyline points="360,195 430,150 500,120 580,95" class="d-arrow-g" marker-end="none"/>
+      <polyline points="580,95 582,195" stroke="#c25c4b" stroke-width="2" fill="none"/>
+      <polyline points="660,195 730,150 800,120 880,95" class="d-arrow-g" marker-end="none"/>
+      <text x="95"  y="135" class="d-tg">learning…</text>
+      <text x="292" y="150" class="d-tr">→ 0</text>
+      <text x="592" y="150" class="d-tr">→ 0</text>
+      <text x="40" y="225" class="d-tm">the same lessons are re-learned every single session</text>
+    </svg>
+  </div>
+  <div class="legend"><span class="l-mem">knowledge gained</span><span class="l-query">a session</span><span class="l-reject">lost at session end</span></div>
+</section>
+
+<!-- ======================= 2 · WHAT IT IS ======================= -->
+<section class="slide" data-eyebrow="02 · WHAT IT IS">
+  <h1>A memory that survives the session.</h1>
+  <p class="lead">SCNS is a background service on your machine. It watches coding-agent sessions, keeps what mattered, and hands the relevant part back at the start of the next prompt. Three properties define it:</p>
+  <div class="cols cols-3">
+    <div class="card">
+      <h3><span class="tag">PERSISTENT</span>Memory outlives the session</h3>
+      <p>Decisions, gotchas, and lessons are <strong>stored the moment they're learned</strong> and are retrievable weeks later — by meaning, not just by keyword.</p>
+    </div>
+    <div class="card">
+      <h3><span class="tag">PER-REPOSITORY</span>One brain per repo</h3>
+      <p>Each registered repository gets its <strong>own isolated vault</strong>. What the agent learns in project A never bleeds into project B.</p>
+    </div>
+    <div class="card">
+      <h3><span class="tag">LOCAL</span>Nothing leaves your machine</h3>
+      <p>The vault is <strong>a SQLite file in your home directory</strong>. You can open it, query it, delete it. There is no cloud service to trust and no data to exfiltrate.</p>
+    </div>
+  </div>
+  <p class="note">The colors in every diagram that follows mean the same thing: <b style="color:var(--mem)">gold is a memory</b>, <b style="color:var(--query)">cyan is the live session</b>, <b style="color:var(--reject)">rust is what gets filtered out</b>.</p>
+</section>
+
+<!-- ======================= 3 · ARCHITECTURE ======================= -->
+<section class="slide" data-eyebrow="03 · ARCHITECTURE">
+  <h1>How it plugs in.</h1>
+  <p class="lead">The agent talks to a local <em>broker</em> over HTTP on loopback only. A supervisor spawns one <em>child broker per repository</em>, each with its own database and its own memory tree.</p>
+  <div class="diagram">
+    <svg viewBox="0 0 960 330" role="img" aria-label="Session connects through a generated extension to the global broker, which supervises one child broker per repository">
+      <!-- session -->
+      <rect x="20" y="30" width="200" height="86" class="d-query" rx="8"/>
+      <text x="40" y="62" class="d-t">Coding-agent</text>
+      <text x="40" y="80" class="d-t">session</text>
+      <text x="40" y="101" class="d-tm">GitHub Copilot CLI</text>
+      <!-- extension -->
+      <rect x="290" y="30" width="230" height="86" class="d-box" rx="8"/>
+      <text x="310" y="60" class="d-t">extension.mjs</text>
+      <text x="310" y="80" class="d-tm">21 tools · 6 hooks</text>
+      <text x="310" y="98" class="d-tm">context injection</text>
+      <path d="M220,73 L290,73" class="d-arrow"/>
+      <!-- broker -->
+      <rect x="600" y="16" width="340" height="114" class="d-box" rx="8"/>
+      <text x="620" y="46" class="d-t">Global broker</text>
+      <text x="620" y="66" class="d-tg">127.0.0.1:3456</text>
+      <rect x="612" y="80" width="316" height="34" class="d-box2" rx="6"/>
+      <text x="626" y="102" class="d-tm">meta-supervisor — spawns &amp; heals children</text>
+      <path d="M520,73 L600,73" class="d-arrow"/>
+      <text x="528" y="60" class="d-tm">HTTP</text>
+      <text x="524" y="95" class="d-tm">loopback</text>
+      <text x="536" y="110" class="d-tm">only</text>
+      <!-- children -->
+      <path d="M700,130 L420,185" class="d-arrow"/>
+      <path d="M760,130 L735,185" class="d-arrow"/>
+      <path d="M830,130 L870,185" class="d-arrow"/>
+      <rect x="260" y="190" width="300" height="110" class="d-mem" rx="8"/>
+      <text x="280" y="218" class="d-t">child broker · repo A</text>
+      <text x="280" y="239" class="d-tg">127.0.0.1:3500</text>
+      <text x="280" y="262" class="d-tm">own vault.db · own SCNS_HOME</text>
+      <text x="280" y="281" class="d-tm">memories, lessons, suggestions</text>
+      <rect x="590" y="190" width="300" height="110" class="d-mem" rx="8"/>
+      <text x="610" y="218" class="d-t">child broker · repo B</text>
+      <text x="610" y="239" class="d-tg">127.0.0.1:3501</text>
+      <text x="610" y="262" class="d-tm">own vault.db · own SCNS_HOME</text>
+      <text x="610" y="281" class="d-tm">fully isolated from repo A</text>
+      <text x="906" y="250" class="d-tm">…</text>
+    </svg>
+  </div>
+  <p class="small">The extension forwards every hook (session start/end, prompt, tool use, errors) as events, and injects context on each prompt. Everything binds to <code>127.0.0.1</code> — nothing is reachable from the network. The broker also exposes an MCP endpoint for other hosts; child ports come from a fixed pool (3500–3599). The same broker layer coordinates multi-agent teams: shared task boards, file claims, and agent-to-agent mail.</p>
+</section>
+
+<!-- ======================= 4 · ISOLATION ======================= -->
+<section class="slide" data-eyebrow="04 · ISOLATION">
+  <h1>One brain per repository.</h1>
+  <p class="lead">When a session starts, SCNS resolves the working directory to the <em>deepest registered project root</em> and routes all memory traffic to that project's own child broker. Isolation is physical, not a filter: each child gets its own <code>SCNS_HOME</code> — a separate memory tree and a separate database file.</p>
+  <div class="diagram">
+    <svg viewBox="0 0 960 240" role="img" aria-label="A session's working directory resolves to its own project vault; vaults never mix">
+      <rect x="20" y="80" width="240" height="80" class="d-query" rx="8"/>
+      <text x="40" y="110" class="d-t">session</text>
+      <text x="40" y="133" class="d-tm">cwd = ~/Code/repo-a/src</text>
+      <path d="M260,120 L370,120" class="d-arrow"/>
+      <text x="268" y="108" class="d-tm">resolve(cwd)</text>
+      <rect x="370" y="80" width="230" height="80" class="d-box" rx="8"/>
+      <text x="390" y="110" class="d-t">project registry</text>
+      <text x="390" y="133" class="d-tm">deepest root containing cwd</text>
+      <path d="M600,120 L710,80" class="d-arrow"/>
+      <!-- vaults -->
+      <g>
+        <ellipse cx="790" cy="46" rx="80" ry="14" class="d-mem"/>
+        <path d="M710,46 v44 a80,14 0 0 0 160,0 v-44" class="d-mem" fill="var(--mem-dim)"/>
+        <text x="748" y="80" class="d-tg">repo-a vault</text>
+      </g>
+      <g>
+        <ellipse cx="790" cy="160" rx="80" ry="14" class="d-mem"/>
+        <path d="M710,160 v44 a80,14 0 0 0 160,0 v-44" class="d-mem" fill="var(--mem-dim)"/>
+        <text x="748" y="194" class="d-tg">repo-b vault</text>
+      </g>
+      <path d="M790,96 L790,132" class="d-arrow-r"/>
+      <text x="804" y="118" class="d-tr">never shared</text>
+    </svg>
+  </div>
+  <p class="note">Why it matters: a user-scoped memory shared across all repos is both noisy (repo A's conventions pollute repo B's answers) and a confidentiality risk (client A's knowledge surfaces in client B's session). A strict mode (<code>SCNS_REQUIRE_PROJECT_BROKER=1</code>) goes further and refuses memory writes entirely if a session didn't resolve to its own project broker.</p>
+</section>
+
+<!-- ======================= 5 · STORING ======================= -->
+<section class="slide" data-eyebrow="05 · WRITE PATH">
+  <h1>Writing a memory.</h1>
+  <p class="lead">A memory is a markdown file in the vault. On store it is immediately chunked, keyword-indexed, and — before the call returns — embedded as a vector. The contract: <em>if it stored, it's retrievable, right now.</em></p>
+  <div class="diagram">
+    <svg viewBox="0 0 960 230" role="img" aria-label="Store pipeline: canonicalize, write, chunk, keyword index, embed">
+      <rect x="10" y="60" width="150" height="70" class="d-query" rx="8"/>
+      <text x="26" y="88" class="d-t">store(key,</text>
+      <text x="26" y="106" class="d-t">      text)</text>
+      <path d="M160,95 L200,95" class="d-arrow"/>
+      <rect x="200" y="60" width="150" height="70" class="d-box" rx="8"/>
+      <text x="216" y="88" class="d-t">canonicalize</text>
+      <text x="216" y="108" class="d-tm">key → posix path</text>
+      <path d="M350,95 L390,95" class="d-arrow"/>
+      <rect x="390" y="60" width="150" height="70" class="d-mem" rx="8"/>
+      <text x="406" y="88" class="d-t">vault write</text>
+      <text x="406" y="108" class="d-tm">.md file on disk</text>
+      <path d="M540,95 L580,95" class="d-arrow"/>
+      <rect x="580" y="60" width="150" height="70" class="d-box" rx="8"/>
+      <text x="596" y="88" class="d-t">chunk</text>
+      <text x="596" y="108" class="d-tm">≤400 tokens each</text>
+      <path d="M730,80 L790,48" class="d-arrow"/>
+      <path d="M730,112 L790,148" class="d-arrow"/>
+      <rect x="790" y="18" width="160" height="62" class="d-box" rx="8"/>
+      <text x="806" y="44" class="d-t">FTS5 index</text>
+      <text x="806" y="64" class="d-tm">instant · keyword</text>
+      <rect x="790" y="124" width="160" height="80" class="d-mem" rx="8"/>
+      <text x="806" y="150" class="d-t">embed</text>
+      <text x="806" y="170" class="d-tm">384-dim vector</text>
+      <text x="806" y="188" class="d-tm">awaited on store</text>
+    </svg>
+  </div>
+  <p class="small">This exact pipeline fixed a real bug: embedding used to be deferred to a half-hourly re-index, so a freshly stored memory was <span style="color:var(--reject)">invisible to the next prompt's briefing for up to ~20 minutes</span> — while keyword search still found it, masking the gap. The embed step is now awaited on store. If embedding fails, the memory degrades safely to keyword-searchable and is embedded on the next sweep.</p>
+</section>
+
+<!-- ======================= 6 · EMBEDDINGS ======================= -->
+<section class="slide" data-eyebrow="06 · THE MATH — EMBEDDINGS">
+  <h1>Meaning becomes geometry.</h1>
+  <div class="cols cols-2">
+    <div>
+      <p class="lead" style="margin-bottom:14px">Every chunk of text is run through a small local model (<code>BGE-small-en-v1.5</code>, via ONNX — no API calls) that turns it into <em>384 numbers</em>: a point in space. Texts that mean similar things land near each other, even with zero words in common.</p>
+      <div class="formula">cos(a, b) = a · b / (‖a‖ ‖b‖)
+<span class="c">similar meaning → cos near 1 · unrelated → near 0</span></div>
+      <p class="small" style="margin-top:14px">The model runs in a <strong style="color:var(--text)">disposable child process</strong>, not the broker: its native runtime pins ~1.3&nbsp;GB of memory that is never returned. Isolating it keeps the always-on broker at ~180&nbsp;MB.</p>
+    </div>
+    <div class="diagram" style="margin-top:0">
+      <svg viewBox="0 0 480 345" role="img" aria-label="Vector space: memories as gold points; the query as a cyan star; nearby points are semantically similar">
+        <line x1="30" y1="305" x2="460" y2="305" class="d-hair"/>
+        <line x1="30" y1="305" x2="30" y2="30" class="d-hair"/>
+        <text x="290" y="328" class="d-tm">384-dim space · 2-D view</text>
+        <!-- neighborhood -->
+        <circle cx="206" cy="212" r="88" fill="none" stroke="var(--query)" stroke-dasharray="4 5" stroke-width="1.2"/>
+        <!-- query star -->
+        <path d="M190,150 l6,14 15,2 -11,10 3,15 -13,-8 -13,8 3,-15 -11,-10 15,-2 z" transform="translate(10,50)" fill="var(--query)"/>
+        <text x="172" y="252" class="d-tq">the query</text>
+        <!-- near memories -->
+        <circle cx="262" cy="152" r="8" fill="var(--mem)"/>
+        <text x="276" y="142" class="d-tg">"ONNX arena never freed</text>
+        <text x="276" y="157" class="d-tg"> — use a child process"</text>
+        <circle cx="146" cy="142" r="8" fill="var(--mem)"/>
+        <text x="52" y="116" class="d-tg">"broker stays ~180 MB"</text>
+        <!-- far memory -->
+        <circle cx="424" cy="282" r="8" fill="var(--mem)" fill-opacity="0.35" stroke="var(--mem)" stroke-opacity="0.5"/>
+        <text x="246" y="288" class="d-tm">"dashboard runs on :3001"</text>
+      </svg>
+      <div class="legend"><span class="l-mem">a stored memory</span><span class="l-query">the query</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================= 7 · HYBRID SEARCH ======================= -->
+<section class="slide" data-eyebrow="07 · THE MATH — RETRIEVAL STEP 1">
+  <h1>Step 1 — cast two nets.</h1>
+  <p class="lead">Retrieval starts by finding <em>anchors</em>: the best entry points for the query. Two searches run side by side — exact words and meaning — because each catches what the other misses.</p>
+  <div class="cols cols-2">
+    <div class="card">
+      <h3><span class="tag">KEYWORD NET</span>Full-text search (FTS5 / BM25)</h3>
+      <p>Catches <strong>exact terms</strong>: error strings, flag names, file paths. Rank is normalized as <code>1 / (1 + |rank|)</code>.</p>
+    </div>
+    <div class="card">
+      <h3><span class="tag">VECTOR NET</span>Nearest neighbors (sqlite-vec)</h3>
+      <p>Catches <strong>meaning</strong>: "memory leak in the embedder" finds the ONNX-arena note even with no shared words.</p>
+    </div>
+  </div>
+  <div class="formula" style="margin-top:18px">score  =  <span class="g">0.7 · vector_similarity</span>  +  <span class="q">0.3 · keyword_score</span>
+<span class="c">meaning dominates; exact words still count — top 20 become anchors</span></div>
+  <p class="small" style="margin-top:14px">Both nets run inside the same SQLite file — FTS5 is built in, and the <code>sqlite-vec</code> extension does the nearest-neighbor search. No separate search server, no vector database service.</p>
+</section>
+
+<!-- ======================= 8 · GRAPH TRAVERSAL ======================= -->
+<section class="slide" data-eyebrow="08 · THE MATH — RETRIEVAL STEP 2">
+  <h1>Step 2 — follow the graph.</h1>
+  <p class="lead">Memory isn't a flat list. Chunks are linked by <em>entity</em>, <em>temporal</em>, and <em>causal</em> edges — so retrieval can walk from an anchor to the memory that explains it, the way you'd follow a thread. (This is the MAGMA paper's Algorithm&nbsp;1.)</p>
+  <div class="cols cols-2">
+    <div class="diagram" style="margin-top:4px">
+      <svg viewBox="0 0 470 300" role="img" aria-label="Graph walk from query to anchor, hopping along causal edges; one branch pruned when similarity drops">
+        <path d="M60,150 l5,12 13,2 -9,9 2,13 -11,-7 -11,7 2,-13 -9,-9 13,-2 z" fill="var(--query)"/>
+        <text x="28" y="196" class="d-tq">query</text>
+        <circle cx="180" cy="90" r="16" class="d-mem"/>
+        <text x="146" y="60" class="d-tg">anchor</text>
+        <circle cx="320" cy="70" r="14" class="d-mem"/>
+        <circle cx="400" cy="160" r="14" class="d-mem"/>
+        <circle cx="300" cy="230" r="14" class="d-reject"/>
+        <path d="M75,142 L163,99" class="d-arrow-g"/>
+        <path d="M196,86 L305,74" class="d-arrow-g"/>
+        <text x="212" y="64" class="d-tm">causal</text>
+        <path d="M333,79 L388,148" class="d-arrow-g"/>
+        <text x="368" y="104" class="d-tm">entity</text>
+        <path d="M190,104 L288,222" class="d-arrow-r"/>
+        <text x="150" y="270" class="d-tr">pruned: similarity to the</text>
+        <text x="150" y="285" class="d-tr">query dropped &gt; 0.15</text>
+      </svg>
+      <div class="legend"><span class="l-mem">reached &amp; kept</span><span class="l-reject">pruned branch</span></div>
+    </div>
+    <div>
+      <div class="formula">hop appeal  S = exp( <span class="g">λ₁·φ(edge, intent)</span> + <span class="q">λ₂·sim(node, query)</span> )
+path score    = parent · γ  +  S
+
+<span class="c">λ₁ = 1.0   λ₂ = 0.5   γ = 0.5 (decay per hop)</span>
+<span class="c">≤ 5 hops · ≤ 200 nodes · beam of 8 per step</span></div>
+      <p class="small" style="margin-top:14px"><strong style="color:var(--text)">φ adapts to the question.</strong> A <i>"why…"</i> query weights causal edges 5×, a <i>"when…"</i> query boosts temporal edges, a named-thing query boosts entity edges. The walk keeps hopping only while the semantic thread holds — if a neighbor's similarity to the query falls more than 0.15 below the node it came from, that branch is cut.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ======================= 9 · FUSION ======================= -->
+<section class="slide" data-eyebrow="09 · THE MATH — RETRIEVAL STEP 3">
+  <h1>Step 3 — fuse the evidence.</h1>
+  <p class="lead">The keyword net, the vector net, and the graph walk each produce a ranked list. They're combined with <em>Reciprocal Rank Fusion</em>: a chunk that several independent signals rank highly beats a chunk only one signal found.</p>
+  <div class="cols cols-2">
+    <div class="diagram" style="margin-top:4px">
+      <svg viewBox="0 0 470 260" role="img" aria-label="Several ranked lists fuse into one; a chunk appearing in multiple lists rises to the top">
+        <g>
+          <rect x="10" y="20" width="120" height="26" class="d-mem"/><text x="20" y="38" class="d-t">chunk 7</text>
+          <rect x="10" y="52" width="120" height="26" class="d-box"/><text x="20" y="70" class="d-tm">chunk 2</text>
+          <rect x="10" y="84" width="120" height="26" class="d-box"/><text x="20" y="102" class="d-tm">chunk 9</text>
+          <text x="10" y="132" class="d-tm">hybrid · w=1.0</text>
+        </g>
+        <g>
+          <rect x="160" y="20" width="120" height="26" class="d-box"/><text x="170" y="38" class="d-tm">chunk 4</text>
+          <rect x="160" y="52" width="120" height="26" class="d-mem"/><text x="170" y="70" class="d-t">chunk 7</text>
+          <rect x="160" y="84" width="120" height="26" class="d-box"/><text x="170" y="102" class="d-tm">chunk 1</text>
+          <text x="160" y="132" class="d-tm">entity · w=1.0</text>
+        </g>
+        <g>
+          <rect x="310" y="20" width="120" height="26" class="d-mem"/><text x="320" y="38" class="d-t">chunk 7</text>
+          <rect x="310" y="52" width="120" height="26" class="d-box"/><text x="320" y="70" class="d-tm">chunk 5</text>
+          <rect x="310" y="84" width="120" height="26" class="d-box"/><text x="320" y="102" class="d-tm">chunk 2</text>
+          <text x="310" y="132" class="d-tm">temporal · w=0.5</text>
+        </g>
+        <path d="M70,142 L200,185" class="d-arrow"/>
+        <path d="M220,142 L222,185" class="d-arrow"/>
+        <path d="M370,142 L250,185" class="d-arrow"/>
+        <rect x="140" y="190" width="180" height="30" class="d-mem"/>
+        <text x="152" y="210" class="d-t">chunk 7 — score 1.0</text>
+        <text x="332" y="210" class="d-tm">← seen by all three</text>
+      </svg>
+    </div>
+    <div>
+      <div class="formula">raw(d)   = Σ over sources s of   w_s / (60 + rank_s(d))
+score(d) = raw(d) / max raw     <span class="c">top result = 1.0</span></div>
+      <p class="small" style="margin-top:14px">RRF only needs each source's <strong style="color:var(--text)">ordering</strong>, never its raw scores — so a BM25 rank, a vector distance, and a graph-walk score can be combined without inventing a conversion between incompatible scales. The constant 60 is the canonical value from the original RRF paper (Cormack et&nbsp;al. 2009).</p>
+    </div>
+  </div>
+</section>
+
+<!-- ======================= 10 · BUDGET ======================= -->
+<section class="slide" data-eyebrow="10 · THE MATH — RETRIEVAL STEP 4">
+  <h1>Step 4 — fit the budget.</h1>
+  <p class="lead">Context space is expensive, so the briefing must fit in <em>~3,400 tokens</em>. The winning chunks are ordered to read as a narrative, wrapped with provenance, and trimmed by salience — with two guarantees.</p>
+  <div class="diagram">
+    <svg viewBox="0 0 960 170" role="img" aria-label="A token budget bar: anchors are protected, high-salience chunks fill the rest, elided runs collapse to a brevity code, the lowest-salience chunk is dropped">
+      <text x="10" y="24" class="d-tm">token budget — 3,400</text>
+      <rect x="10" y="36" width="860" height="56" fill="none" stroke="var(--line)" stroke-width="1.5" rx="8"/>
+      <rect x="14" y="40" width="240" height="48" class="d-mem" rx="6"/>
+      <text x="30" y="60" class="d-t">anchors</text>
+      <text x="30" y="78" class="d-tm">never elided</text>
+      <rect x="262" y="40" width="300" height="48" fill="var(--mem-dim)" stroke="var(--mem)" stroke-width="1" rx="6"/>
+      <text x="278" y="60" class="d-t">high-salience chunks</text>
+      <text x="278" y="78" class="d-tm">best first, while they fit</text>
+      <rect x="570" y="40" width="296" height="48" fill="none" stroke="var(--muted)" stroke-dasharray="5 4" stroke-width="1" rx="6"/>
+      <text x="618" y="68" class="d-tm">[… 4 events elided &lt;ref:…&gt; …]</text>
+      <rect x="884" y="40" width="66" height="48" class="d-reject" rx="6"/>
+      <text x="893" y="68" class="d-tr">dropped</text>
+      <text x="10" y="130" class="d-tm">each kept chunk ships with provenance:  [&lt;t:timestamp&gt;  content  &lt;ref:chunk-id&gt;]</text>
+      <text x="10" y="152" class="d-tm">ordering adapts:  "when…" → chronological   ·   "why…" → causes before effects   ·   else → by salience</text>
+    </svg>
+  </div>
+  <p class="small">The two guarantees: <strong style="color:var(--text)">anchors are kept unconditionally</strong> (they're the chunks the query matched directly — a pure salience cut would evict them first), and <strong style="color:var(--text)">elided runs leave a trace</strong> — a brevity code with the skipped chunk ids, so the agent can ask for them if it needs to. Token cost uses a fast ~4-chars-per-token estimate.</p>
+</section>
+
+<!-- ======================= 11 · INJECTION ======================= -->
+<section class="slide" data-eyebrow="11 · INJECTION">
+  <h1>What the agent actually sees.</h1>
+  <p class="lead">On <em>every prompt</em> — not just session start — a hook fires, sends the prompt to the project's broker, and prepends up to three blocks of context before the model sees it.</p>
+  <div class="promptbox"><span class="u">❯ why does the embedding worker run in a separate process?</span>
+
+<span class="h">Relevant SCNS memories:</span>
+<span class="b">[&lt;t:2026-06-02&gt; The ONNX runtime pins a ~1.3 GB arena that release()
+never returns; the embedder was moved to a disposable child process.
+Broker RSS stays ~180 MB with the worker isolated. &lt;ref:412&gt;]</span>
+
+<span class="h">Pending SCNS suggestions:</span>  <span class="m">(max 3, only if on-topic)</span>
+<span class="b">- Consider documenting the worker's idle-exit timeout in README.</span>
+
+<span class="h">IMPORTANT — Things to AVOID (learned from past feedback):</span>  <span class="m">(max 10)</span>
+<span class="b">- Never run `npm rebuild better-sqlite3` — it deletes the working
+  binary before rebuilding. [build]</span></div>
+  <p class="small" style="margin-top:14px">Block 1 is the retrieval pipeline from the last four slides, synthesized into a briefing. Blocks 2 and 3 are suggestions and learned guardrails — and they pass through a separate relevance filter first (next slide). The whole exchange has a hard time budget: if memory search can't answer fast enough, the prompt proceeds without it rather than stalling the session.</p>
+</section>
+
+<!-- ======================= 12 · THE FILTER ======================= -->
+<section class="slide" data-eyebrow="12 · INJECTION — THE GATEKEEPER">
+  <h1>Only what's relevant gets in.</h1>
+  <p class="lead">Injected noise is worse than no injection. Suggestions and guardrails are scored against the prompt with a deliberately cheap lexical test — this runs on the hot path of every prompt, so it must cost nothing.</p>
+  <div class="formula">score(item) = |item_words ∩ prompt_words| / |item_words|
+<span class="c">stopwords stripped, words singularized · zero unless ≥ 2 content words match</span>
+<span class="c">asymmetric on purpose: a short item fully covered by a long prompt scores ~1,</span>
+<span class="c">where symmetric overlap would unfairly cap it near 0.1</span></div>
+  <div class="cols cols-2" style="margin-top:18px">
+    <div class="card">
+      <h3><span class="tag">SUGGESTIONS</span>Strict: no match, no injection</h3>
+      <p>Score&nbsp;0 → <strong style="color:var(--reject)">dropped entirely</strong>. A suggestion is a nudge, not a guardrail — an off-topic nudge is pure noise. Top 3 by score make it in.</p>
+    </div>
+    <div class="card">
+      <h3><span class="tag">GUARDRAILS</span>Lenient: a floor of 3, always</h3>
+      <p>"Never hardcode secrets" shares no words with most prompts but still applies. If fewer than 3 rules match lexically, the list is <strong>topped up to 3</strong> — a safety rule should not silently retire just because it's phrased generally.</p>
+    </div>
+  </div>
+  <p class="note">One more balance: <strong>pinned</strong> rules ("this always applies") skip every quality gate — but they're <strong>capped</strong> so they can never crowd out rules that actually match today's prompt. Quality is judged first, topicality second: relevance can narrow what quality admitted, never rescue what review rejected.</p>
+</section>
+
+<!-- ======================= 13 · DATABASE ======================= -->
+<section class="slide" data-eyebrow="13 · THE DATABASE">
+  <h1>Why SQLite.</h1>
+  <p class="lead">The entire memory of a project is <em>one inspectable file</em>. Full-text search (FTS5) is built in; vector search is the <code>sqlite-vec</code> extension. No search server, no vector-DB service, no connection strings — and nothing to exfiltrate.</p>
+  <div class="diagram">
+    <svg viewBox="0 0 960 270" role="img" aria-label="Vault schema: files to chunks, with FTS, vector, and graph tables hanging off chunks">
+      <g>
+        <ellipse cx="110" cy="40" rx="92" ry="15" class="d-mem"/>
+        <path d="M18,40 v180 a92,15 0 0 0 184,0 v-180" class="d-mem" fill="var(--mem-dim)"/>
+        <text x="58" y="130" class="d-tg">vault.db</text>
+        <text x="40" y="152" class="d-tm">~/.scns/memory/</text>
+      </g>
+      <rect x="280" y="30" width="190" height="56" class="d-box" rx="8"/>
+      <text x="296" y="54" class="d-t">vault_files</text>
+      <text x="296" y="74" class="d-tm">path · hash · mtime</text>
+      <rect x="280" y="110" width="190" height="56" class="d-box" rx="8"/>
+      <text x="296" y="134" class="d-t">chunks</text>
+      <text x="296" y="154" class="d-tm">content · offsets · tokens</text>
+      <path d="M375,86 L375,110" class="d-arrow"/>
+      <path d="M470,138 L540,70" class="d-arrow"/>
+      <path d="M470,138 L540,138" class="d-arrow"/>
+      <path d="M470,138 L540,212" class="d-arrow"/>
+      <rect x="540" y="40" width="200" height="56" class="d-box" rx="8"/>
+      <text x="556" y="64" class="d-t">chunks_fts</text>
+      <text x="556" y="84" class="d-tm">FTS5 · porter stemmer</text>
+      <rect x="540" y="112" width="200" height="56" class="d-mem" rx="8"/>
+      <text x="556" y="136" class="d-t">chunk_embeddings</text>
+      <text x="556" y="156" class="d-tm">vec0 · float[384]</text>
+      <rect x="540" y="184" width="200" height="56" class="d-box" rx="8"/>
+      <text x="556" y="208" class="d-t">memory_edges</text>
+      <text x="556" y="228" class="d-tm">entity · temporal · causal</text>
+      <rect x="790" y="112" width="160" height="56" class="d-box" rx="8"/>
+      <text x="806" y="136" class="d-t">event_nodes</text>
+      <text x="806" y="156" class="d-tm">timeline (τ) layer</text>
+      <path d="M740,140 L790,140" class="d-arrow"/>
+    </svg>
+  </div>
+  <p class="small">Details that matter: triggers keep the FTS index in sync <strong style="color:var(--text)">synchronously</strong> — a fact is findable the moment it's stored. Embeddings are raw Float32 blobs. WAL journaling keeps reads non-blocking. Expensive LLM-derived causal edges are keyed on stable content hashes so they survive re-chunking; cheap deterministic edges are just rebuilt. Each concern gets its own database file (vault, experience log, broker state, registry) — and each repo's child broker gets its own copy of all of them.</p>
+</section>
+
+<!-- ======================= 14 · LEARNING LOOP ======================= -->
+<section class="slide" data-eyebrow="14 · THE LEARNING LOOP">
+  <h1>Learning what was worth injecting.</h1>
+  <p class="lead">Every briefing is logged as an experience. Human behavior labels it: re-asking the same question means the briefing was <em style="color:var(--reject)">waste</em>; answering a clarifying question SCNS asked means <em>accept</em>. A weekly review measures whether the routing between two retrieval tools agrees with those outcomes.</p>
+  <div class="cols cols-2">
+    <div class="diagram" style="margin-top:4px">
+      <svg viewBox="0 0 470 240" role="img" aria-label="Loop: briefing served, outcome observed, experience logged, weekly review, dashed line back to routing — not yet closed">
+        <rect x="20" y="20" width="180" height="52" class="d-mem" rx="8"/>
+        <text x="36" y="42" class="d-t">briefing served</text>
+        <text x="36" y="62" class="d-tm">magma | multihop-iter</text>
+        <path d="M200,46 L280,46" class="d-arrow"/>
+        <rect x="280" y="20" width="190" height="52" class="d-query" rx="8"/>
+        <text x="296" y="42" class="d-t">human outcome</text>
+        <text x="296" y="62" class="d-tm">accept 1.0 … waste 0.0</text>
+        <path d="M365,72 L365,110" class="d-arrow"/>
+        <rect x="245" y="110" width="205" height="52" class="d-box" rx="8"/>
+        <text x="261" y="132" class="d-t">experience log</text>
+        <text x="261" y="152" class="d-tm">query · tool · outcome</text>
+        <path d="M245,136 L180,136" class="d-arrow"/>
+        <rect x="20" y="110" width="160" height="52" class="d-box" rx="8"/>
+        <text x="36" y="132" class="d-t">weekly review</text>
+        <text x="36" y="152" class="d-tm">Mondays 09:00</text>
+        <path d="M100,110 L100,72" class="d-arrow-r"/>
+        <text x="40" y="196" class="d-tr">routing cutover: not yet —</text>
+        <text x="40" y="212" class="d-tr">needs evidence above chance</text>
+      </svg>
+    </div>
+    <div>
+      <div class="formula">agreement = 0.5 + 0.5 · (accept-rate of the
+            recommended tool − the other tool)
+<span class="c">stratified by question shape — chance is exactly 0.5</span>
+<span class="c">by construction, under any traffic mix</span>
+
+cutover bar: 95% lower bound &gt; 0.55 on ≥ 100 rows</div>
+      <p class="small" style="margin-top:14px"><strong style="color:var(--text)">Honest status:</strong> this is the least finished part of SCNS. The machinery runs end-to-end, but human labels are scarce (~74 of 2,623 logged retrievals), and no learned weight feeds back into live retrieval yet. The metric was designed so that scarcity can't fake a win.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ======================= 15 · NUMBERS & CREDITS ======================= -->
+<section class="slide" data-eyebrow="15 · STATUS">
+  <h1>By the numbers.</h1>
+  <div class="statgrid">
+    <div class="stat"><div class="n">109k</div><div class="l">lines of TypeScript source (443 files)</div></div>
+    <div class="stat"><div class="n">1.45×</div><div class="l">more test code than source — 8,700+ test cases in 613 files</div></div>
+    <div class="stat"><div class="n">3</div><div class="l">platforms: macOS, Linux, native Windows — runs as a user service</div></div>
+    <div class="stat"><div class="n">0</div><div class="l">bytes leave your machine — loopback-only, deny-all egress by default</div></div>
+  </div>
+  <div style="margin-top: clamp(16px, 3vh, 28px)">
+    <table class="facts">
+      <tr><td>safety</td><td>Anything that can act outside the machine (push branches, file issues, spawn agents) is off by default, individually opt-in, and audited to a hash-chained log. An unrecognized flag value means off.</td></tr>
+      <tr><td>operations</td><td>Self-healing supervisor, blue/green restarts with automatic rollback, and a 15-check <span class="mono" style="color:var(--text)">doctor</span> that treats "running but nothing would revive it" as a failure.</td></tr>
+      <tr><td>prior art</td><td>The retrieval architecture follows the MAGMA paper (arXiv:2601.03236) — graphs, guided traversal, the salience budget. Built here: the SQLite binding, per-repo brokers, the extension, and the accept-vs-waste loop.</td></tr>
+      <tr><td>status</td><td>Alpha. In daily use on two machines; the memory + injection layer is the proven part, the learning loop is the open frontier.</td></tr>
+    </table>
+  </div>
+  <div style="margin-top:auto; padding-top: clamp(16px, 3vh, 28px)">
+    <div class="eyebrow" style="margin-bottom:8px">SCNS</div>
+    <div style="font-family: var(--display); font-weight:700; font-size: clamp(20px, 2.6vw, 32px)">A memory that survives the session. <span class="muted" style="font-weight:400">Questions?</span></div>
+  </div>
+</section>
+
+</div>
+
+<div class="footer">
+  <span>SCNS · Second Central Nervous System</span>
+  <span class="counter mono">rowid <b id="cur">01</b> / <span id="total">16</span></span>
+</div>
+<div class="progress" id="progress"></div>
+<div class="navbtns">
+  <button id="prev" aria-label="Previous slide">‹</button>
+  <button id="next" aria-label="Next slide">›</button>
+</div>
+
+<script>
+  (function () {
+    var slides = Array.prototype.slice.call(document.querySelectorAll('.slide'));
+    var cur = document.getElementById('cur');
+    var total = document.getElementById('total');
+    var progress = document.getElementById('progress');
+    var i = 0;
+    total.textContent = String(slides.length);
+
+    function pad(n) { return (n < 10 ? '0' : '') + n; }
+
+    function show(n) {
+      i = Math.max(0, Math.min(slides.length - 1, n));
+      slides.forEach(function (s, j) {
+        s.classList.toggle('active', j === i);
+        s.setAttribute('aria-hidden', j === i ? 'false' : 'true');
+      });
+      cur.textContent = pad(i + 1);
+      progress.style.width = (((i + 1) / slides.length) * 100) + '%';
+      if (history.replaceState) history.replaceState(null, '', '#' + (i + 1));
+    }
+
+    function fromHash() {
+      var h = parseInt(location.hash.slice(1), 10);
+      show(isNaN(h) ? 0 : h - 1);
+    }
+
+    document.addEventListener('keydown', function (e) {
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      switch (e.key) {
+        case 'ArrowRight': case ' ': case 'PageDown': e.preventDefault(); show(i + 1); break;
+        case 'ArrowLeft': case 'PageUp': e.preventDefault(); show(i - 1); break;
+        case 'Home': e.preventDefault(); show(0); break;
+        case 'End': e.preventDefault(); show(slides.length - 1); break;
+        case 'f': case 'F':
+          if (document.fullscreenElement) document.exitFullscreen();
+          else document.documentElement.requestFullscreen();
+          break;
+      }
+    });
+    document.getElementById('prev').addEventListener('click', function () { show(i - 1); });
+    document.getElementById('next').addEventListener('click', function () { show(i + 1); });
+    window.addEventListener('hashchange', fromHash);
+    fromHash();
+  })();
+</script>
+</body>
+</html>

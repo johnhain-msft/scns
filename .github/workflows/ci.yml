@@ -1,0 +1,150 @@
+# BLOCKING CI/CD gate for scns.
+#
+# Companion to `windows-smoke.yml`, which is deliberately advisory
+# (`continue-on-error: true`) and Windows-only. Before this file existed that
+# smoke job was the repo's ONLY automation, so three npm scripts that already
+# existed — `lint`, `format:check`, `typecheck` — plus the entire integration
+# suite were never run by anything, and a push to `main` ran nothing at all.
+#
+# Scope note: `test:e2e` and `test:stress` are intentionally NOT run here. They
+# spawn brokers and long-lived child processes on 30s+ timeouts; wiring them in
+# would buy a permanently flaky required check rather than signal. They stay a
+# local/nightly concern until they are hermetic.
+#
+# The shape of this file is asserted by `test/unit/ci/ci-workflow.test.ts` —
+# notably that the Node matrix matches `package.json#engines` exactly, so
+# widening the supported range fails a test instead of silently shipping an
+# untested claim.
+name: ci
+
+on:
+  push:
+    branches: [main]
+    # Tags trigger the release job below. Without this the `refs/tags/v*`
+    # condition on that job could never be true, because a `branches` filter
+    # alone excludes tag pushes outright.
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# A push storm on one ref should cost one run, not one run per push.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    name: lint · format · types
+    runs-on: ubuntu-latest
+    # Install + three static checks. Generous, but far from the 360-minute
+    # default a hung step would otherwise burn.
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # `format:check:changed` diffs against a base commit, which a
+          # shallow clone does not contain — without this the gate would
+          # skip on every run and look permanently green.
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install
+        run: npm ci
+      - name: Lint
+        run: npm run lint
+      - name: Formatting (files this change touches)
+        # Repo-wide `format:check` still reports ~350 pre-existing offenders;
+        # gating on it would make CI red on day one for nobody's fault. This
+        # holds the line on new work while that backlog is retired separately.
+        env:
+          FORMAT_BASE_REF: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+        run: npm run format:check:changed
+      - name: Types
+        run: npm run typecheck
+
+  test:
+    name: test (node ${{ matrix.node-version }})
+    runs-on: ubuntu-latest
+    # The longest job: install, native build, then the unit and integration
+    # suites. Without a bound a single hung test would pin five runners for
+    # six hours each — and several suites here spawn real child processes.
+    timeout-minutes: 45
+    strategy:
+      # One bad major must not hide the state of the others.
+      fail-fast: false
+      matrix:
+        # Every major claimed by package.json#engines.node. Each exercises a
+        # different better-sqlite3 prebuild ABI, which is the thing that
+        # actually breaks when the range claim goes stale.
+        node-version: [20, 22, 23, 24, 25]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+      - name: Install
+        run: npm ci
+      - name: Build (also covers the asset-copy and native build scripts)
+        run: npm run build
+      # fastembed-js downloads its ONNX model from the public GCS bucket
+      # `qdrant-fastembed` on first use. That bucket began answering anonymous
+      # requests with 403 AccessDenied between 2026-09-23 (the last green
+      # download on these runners) and 2026-10-05 — fastembed then tar-extracts
+      # the XML error body it saved, so every embedding-dependent integration
+      # test died with `TAR_BAD_ARCHIVE: Unrecognized archive format`. The
+      # Qdrant Hugging Face mirror is login-gated as well, so the model is
+      # self-hosted on this repo's orphan `ci-model-cache` branch and seeded
+      # into `local_cache/` here. fastembed's retrieveModel() sees the
+      # extracted directory and never attempts a download. The cache step makes
+      # the git fetch a once-per-eviction cost, not a per-run one.
+      - name: Restore embedding model cache
+        id: model-cache
+        uses: actions/cache@v4
+        with:
+          path: local_cache
+          key: fastembed-fast-bge-small-en-v1.5-v1
+      - name: Seed embedding model cache (ci-model-cache branch)
+        if: steps.model-cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p local_cache
+          git fetch --depth=1 origin ci-model-cache
+          git cat-file blob FETCH_HEAD:fast-bge-small-en-v1.5.tar.gz | tar xz -C local_cache
+          # Fail loud here rather than letting every embed test fail obscurely.
+          test -f local_cache/fast-bge-small-en-v1.5/tokenizer.json
+      - name: Unit tests
+        run: npm run test:unit
+      - name: Integration tests
+        run: npm run test:integration
+
+  release:
+    name: package dist
+    needs: [quality, test]
+    # Only a version tag or a deliberate manual run produces an artifact;
+    # ordinary pushes and pull requests stop after quality + test.
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install
+        run: npm ci
+      - name: Build
+        run: npm run build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: scns-dist-${{ github.sha }}
+          path: dist/
+          # A silently empty artifact is worse than a failed job.
+          if-no-files-found: error
+          retention-days: 14

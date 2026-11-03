@@ -1,0 +1,49 @@
+node_modules/
+dist/
+.env
+*.db
+*.db-wal
+*.db-shm
+.cortex/
+.agent/
+*.log
+coverage/
+.turbo/
+.next/
+local_cache/
+.DS_Store
+
+# Backstop for #57: a crashed test run must never leave an artifact the auto-stage
+# (`git add -A`) can sweep into a commit. The real fix is that tests put scratch space
+# in os.tmpdir() — enforced by test/unit/harness/scratch-dir-isolation.test.ts.
+.test-*
+test-vault-*
+
+# SCNS: collected Copilot CLI logs (ephemeral, per-machine)
+.github/logs/
+
+# SCNS: per-session Copilot scratch space (ephemeral, never source of truth)
+.copilot-scratch/
+
+# Security: sensitive key/cert files
+*.pem
+*.key
+*.cert
+*.p12
+out/
+
+# Vendored reference material: third-party documents carrying no inbound licence
+# permitting redistribution do not belong in the tree. Ignoring the whole directory
+# stops a future vendored dump being committed by accident.
+#
+# NOTE: the four subdirectories that remain (session-broker, dashboard, second-brain,
+# research) are the author's own prior work and are ALREADY TRACKED — git ignores only
+# untracked files, so they are unaffected. `git add -f` is required for new files there.
+references/
+
+# Copilot CLI session state (ephemeral, per-machine)
+.copilot/
+
+# Build/test artifacts that once slipped into tracking
+*.tsbuildinfo
+dashboard/test-results/
