@@ -25,8 +25,10 @@ function safeOutwardUsable(): CapabilityAssessment {
     backing_subsystems: ['src/broker/services/outward', 'config/safety-allowlist.json'],
     evidence: [
       {
-        claim: 'an outward action with an empty allowlist is denied (fail-closed), kernel untouched',
-        quoted_output: 'outward.send → DENIED (allowlist empty; fail-closed); kernel bytes unchanged',
+        claim:
+          'an outward action with an empty allowlist is denied (fail-closed), kernel untouched',
+        quoted_output:
+          'outward.send → DENIED (allowlist empty; fail-closed); kernel bytes unchanged',
         artifact_ref: 'docs/evidence/fable5-audit-findings.md',
       },
     ],
@@ -66,7 +68,12 @@ function mapWith(...caps: CapabilityAssessment[]): ReadinessMap {
     signoff: { producer_context_id: 'ctx-producer', grader_context_id: 'ctx-grader', agreed: true },
     capabilities: caps,
     prioritized_gap_map: [
-      { capability_id: 'self_direction', priority: 1, missing_pieces: ['scheduler'], blocks: ['autonomy'] },
+      {
+        capability_id: 'self_direction',
+        priority: 1,
+        missing_pieces: ['scheduler'],
+        blocks: ['autonomy'],
+      },
     ],
     magma_placement: 'US2 placed in the gap map',
     distance_summary: 'honest distance: mostly built, one capability usable',
