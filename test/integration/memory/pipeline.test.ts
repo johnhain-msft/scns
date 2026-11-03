@@ -4,7 +4,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { mkdtempSync, rmSync, statSync, utimesSync } from 'node:fs'
+import { mkdtempSync, rmSync, utimesSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { openMemoryDb, closeMemoryDb } from '../../../src/memory/db.js'
@@ -93,17 +93,25 @@ describe('Memory pipeline integration', () => {
   })
 
   it('re-indexes an update that lands in the same mtime granule (#52)', () => {
-    vault.write('MEMORY.md', 'The project uses Express 4 for the HTTP server.')
+    // The race from #52: a second write whose mtime equals the one already
+    // indexed (same-length content, same filesystem timestamp granule), so
+    // the mtime shortlist alone would never see the update. Simulate the
+    // granule collision by pinning BOTH writes to one shared timestamp. The
+    // timestamp sits minutes in the future so the first write stays inside
+    // the indexer's racy window even if a loaded CI runner stalls this test
+    // between the write and the index pass — with a PAST pinned mtime, a
+    // >2s stall makes the first pass persist an exact (unsmudged) mtime and
+    // the test would then exercise nothing. A real same-granule second write
+    // can never carry an mtime older than the pass that indexed its
+    // predecessor, so the future pin loses no realism.
+    const sharedMtime = new Date(Date.now() + 5 * 60_000)
     const filePath = join(rootDir, 'MEMORY.md')
-    const firstMtime = statSync(filePath).mtime
+    vault.write('MEMORY.md', 'The project uses Express 4 for the HTTP server.')
+    utimesSync(filePath, sharedMtime, sharedMtime)
     indexVaultSync(db, vault)
 
-    // The race from #52: a second write whose mtime equals the one already
-    // indexed (same-length content, same filesystem timestamp granule).
-    // Reproduce it exactly by pinning the updated file's mtime to the first
-    // write's mtime — the mtime shortlist alone would never see this update.
     vault.write('MEMORY.md', 'The project uses Express 5 for the HTTP server.')
-    utimesSync(filePath, firstMtime, firstMtime)
+    utimesSync(filePath, sharedMtime, sharedMtime)
     indexVaultSync(db, vault)
 
     const results = keywordOnlySearch(db, 'Express')
