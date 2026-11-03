@@ -24,6 +24,26 @@ import { routeIdentityRuntimeJs } from './route-identity.js'
 import { startupNoticeRuntimeJs } from './startup-notice.js'
 
 /**
+ * How long a session waits at startup for an IDLE-REAPED project broker to
+ * come back, before giving up and falling back to the global broker.
+ *
+ * Derived from measurement, not taste. Over 5 real spawns on this machine at
+ * the production 5s supervisor tick, wake -> registry `running` took
+ * 10.07s, 10.07s, 10.18s, 15.19s, 10.26s (mean 11.16s, max 15.19s). The
+ * latency is quantised to the tick — one tick to spawn, another to promote
+ * `starting` -> `running` — so the distribution is a staircase at 10s/15s/20s
+ * rather than a bell around the mean, and the load condition documented for
+ * this box (concurrent test runs starving health probes) adds steps.
+ *
+ * 45s is ~3x the measured mean and clears a 4-tick worst case with room. It
+ * applies ONLY while `/api/meta/resolve` is answering `child-idle`: a project
+ * that is dead for any other reason still falls back on the ordinary
+ * {@link DEFAULT_RECONCILE_READY_TIMEOUT_MS}, so this cannot hang a session
+ * behind a genuinely broken broker.
+ */
+export const CHILD_WAKE_TIMEOUT_MS = 45_000
+
+/**
  * Issue #61, option A — session-start reconciliation.
  *
  * When present, the generated extension health-checks the global broker at
@@ -356,6 +376,7 @@ let startupResolution = null;
 let projectRecoveryPending = false;
 let brokerResolutionFailure = null;
 const CHILD_READY_TIMEOUT_MS = ${DEFAULT_RECONCILE_READY_TIMEOUT_MS};
+const CHILD_WAKE_TIMEOUT_MS = ${CHILD_WAKE_TIMEOUT_MS};
 const CHILD_READY_POLL_MS = ${DEFAULT_RECONCILE_POLL_MS};
 let reResolveUsed = false;
 // Project that owns this cwd, including while its child is unavailable.
@@ -441,7 +462,20 @@ async function resolveBrokerRoute(trigger) {
   // Only startup waits. Subsequent requests get one resolve attempt, so a
   // prolonged outage cannot stall every hook for another readiness budget.
   const waitMs = trigger === "startup" ? CHILD_READY_TIMEOUT_MS : 0;
-  const deadline = Date.now() + waitMs;
+  // An idle-reaped broker is a COLD START, and a cold start is measurably
+  // slower than the generic readiness budget assumes. Measured on this
+  // machine, wake -> registry says running, over 5 real spawns at the
+  // production 5s tick: 10.07s, 10.07s, 10.18s, 15.19s, 10.26s (mean 11.16s).
+  // The latency is QUANTISED to the supervisor tick — one tick to spawn,
+  // another to promote starting -> running — so the tail sits at 15s and 20s,
+  // not at the mean, and the documented load condition on this box
+  // (concurrent test runs starving probes) adds steps. The generic 20s budget
+  // therefore had ~4.8s of margin against the worst observed case and none at
+  // all against a 4-tick one. The longer deadline below is used ONLY while the
+  // reason is child-idle, so a genuinely dead project still falls back on the
+  // ordinary budget rather than hanging a session for 45s.
+  const startedAt = Date.now();
+  let deadline = startedAt + waitMs;
   let reason = "unresolved";
   let waitingLogged = false;
   do {
@@ -473,8 +507,27 @@ async function resolveBrokerRoute(trigger) {
           return;
         }
         reason = (data && data.reason) || "unresolved";
+        // 'child-idle' is a COLD START, not a refusal: the broker was reaped
+        // for idleness and the resolve above has already flipped its registry
+        // row so the supervisor respawns it. Waiting here is what keeps idle
+        // reaping safe — a non-retryable reason would latch this session on
+        // global:fallback, which refuses every memory write for its whole life.
+        // 'child-stopped' stays OUT: that one is an operator stop, and waiting
+        // for a human decision is not something a session should do.
         retryable = projectId !== null &&
-          ["child-registered", "child-starting", "child-failing"].includes(reason);
+          ["child-registered", "child-starting", "child-failing", "child-idle"].includes(reason);
+        // Anchored to the loop's START, never to now(). That makes re-applying
+        // it on every pass IDEMPOTENT, which is the property that actually
+        // matters. Sampling Date.now() here instead produced a later candidate
+        // on every pass, so the deadline advanced 45s PER PASS forever: while
+        // the resolve kept answering child-idle the startup resolution never
+        // returned, and because every broker read and write funnels through
+        // fetchBroker -> recoverProjectRoute -> awaitStartupResolution, every
+        // SCNS tool call in the session blocked behind it indefinitely.
+        if (waitMs && reason === "child-idle") {
+          const wakeDeadline = startedAt + CHILD_WAKE_TIMEOUT_MS;
+          if (wakeDeadline > deadline) deadline = wakeDeadline;
+        }
       } else {
         reason = "HTTP " + res.status;
         retryable = resolvedProjectId !== null && res.status >= 500;

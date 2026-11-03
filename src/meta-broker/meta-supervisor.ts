@@ -46,10 +46,11 @@ import {
   resetHealthFailures,
   stickyDesiredPort,
   updateChildState,
+  type ProjectChildState,
 } from './registry.js'
 import { allocatePort } from './port-allocator.js'
 import { swapChildBroker, type ChildSwapConfig, type ChildSwapResult } from './child-blue-green.js'
-import { planTick, type TickPolicy } from './supervisor-tick.js'
+import { planTick, DEFAULT_IDLE_TIMEOUT_MS, type TickPolicy } from './supervisor-tick.js'
 
 const log = logger.child({ module: 'meta-supervisor' })
 
@@ -77,6 +78,44 @@ export interface MetaSupervisorConfig {
   readonly now?: () => number
   /** Optional fetch (testing). Must throw / non-2xx on failure. */
   readonly httpProbe?: (port: number, instanceId: string) => Promise<boolean>
+  /**
+   * Structured probe (testing). Takes precedence over {@link httpProbe}, which
+   * is kept as the boolean-only shim so existing callers keep compiling — a
+   * boolean probe simply reports idleness as unknown, and unknown never reaps.
+   */
+  readonly childProbe?: (port: number, instanceId: string) => Promise<ChildProbeResult>
+  /**
+   * Last-resort force stop for a pid that ignored SIGTERM and SIGKILL
+   * (testing). Defaults to the same platform command the restart path uses.
+   * Must throw when the stop could not be issued.
+   */
+  readonly forceStopPid?: (pid: number) => void
+  /**
+   * Bind-probe for a port (testing). Defaults to the real one. Used by every
+   * port decision the supervisor makes — allocation, same-port recovery, and
+   * the verified stop — so a test cannot have them disagree.
+   */
+  readonly isPortInUse?: (port: number) => Promise<boolean>
+}
+
+/** What one identity-checked health probe learned about a child. */
+export interface ChildProbeResult {
+  /** The child answered AND echoed the instance id we spawned it with. */
+  readonly ok: boolean
+  /**
+   * Ms since the child last served a non-monitoring request, per its
+   * `/api/health` payload. Null when the child did not report it (an older
+   * build, or a probe that did not get a parseable body) — which the planner
+   * reads as "idleness unknown" and therefore never reaps on.
+   */
+  readonly lastRequestAgeMs: number | null
+  /**
+   * The child's SELF-REPORTED pid, from the same payload. Null when the child
+   * is too old to report it. Required to adopt a child this supervisor did not
+   * spawn — see `adoptChild`. Deliberately not sourced from the registry's
+   * `child_pid`, which is advisory and may name a recycled pid.
+   */
+  readonly pid: number | null
 }
 
 export interface MetaSupervisor {
@@ -108,12 +147,22 @@ const DEFAULT_POLICY: TickPolicy = {
   cooldownMs: 30_000,
   maxRestartsPerWindow: 3,
   windowMs: 600_000,
+  idleTimeoutMs: DEFAULT_IDLE_TIMEOUT_MS,
 }
 
 const DEFAULT_INTERVAL_MS = 5_000
 
-/** Grace before a suspended child that ignored SIGTERM is SIGKILLed. */
-const SUSPEND_KILL_GRACE_MS = 5_000
+/** Grace for each escalation step of a deliberate stop to take effect. */
+const STOP_GRACE_MS = 5_000
+/**
+ * Grace for a dead child's port to become bindable again. Separate from
+ * {@link STOP_GRACE_MS} because this is the check that decides whether the
+ * project can be respawned at all — see `stopChildVerified`.
+ */
+const PORT_RELEASE_GRACE_MS = 5_000
+const STOP_POLL_MS = 100
+/** Hard bound on the synchronous last-resort force stop. */
+const FORCE_STOP_TIMEOUT_MS = 10_000
 
 export interface ChildSpawnSpecInput {
   readonly brokerEntry: string
@@ -208,9 +257,68 @@ export function buildChildSpawnSpec(input: ChildSpawnSpecInput): ChildSpawnSpec 
 }
 
 interface LiveChild {
-  readonly proc: ChildProcess
+  /**
+   * The handle for a child THIS supervisor spawned, or null for an ADOPTED
+   * one — a child that was already running and was identity-verified over
+   * HTTP. An adopted child has no `exit` event and cannot be `proc.kill()`ed;
+   * everything that touches a child must therefore go through `signalChild`,
+   * `childHasExited` and `child.pid` rather than reaching for `.proc`.
+   */
+  readonly proc: ChildProcess | null
+  /**
+   * Always present. For a spawned child this is `proc.pid`; for an adopted one
+   * it is the pid the child reported about ITSELF on an identity-checked
+   * probe.
+   */
+  readonly pid: number
   readonly port: number
   readonly instanceId: string
+}
+
+/** True when `pid` names a live process. EPERM counts as alive. */
+function isPidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code === 'EPERM'
+  }
+}
+
+/**
+ * A pid we are willing to manage a process by.
+ *
+ * Deliberately stricter than a null check: `ChildProbeResult.pid` crosses an
+ * injectable boundary, and a probe that simply omits the field yields
+ * `undefined`, which satisfies `!== null` and would then be handed to
+ * `process.kill`. Adoption must never record a child it cannot actually
+ * signal.
+ */
+function isUsablePid(pid: number | null | undefined): pid is number {
+  return typeof pid === 'number' && Number.isInteger(pid) && pid > 0
+}
+
+/**
+ * Pick the probe implementation: the structured one when supplied, otherwise a
+ * caller-supplied boolean probe lifted into the structured shape (reporting
+ * idleness as unknown), otherwise the real HTTP probe.
+ */
+function resolveProbe(
+  cfg: MetaSupervisorConfig,
+): (port: number, instanceId: string) => Promise<ChildProbeResult> {
+  if (cfg.childProbe) return cfg.childProbe
+  const boolProbe = cfg.httpProbe
+  if (boolProbe) {
+    return async (port, instanceId) => ({
+      ok: await boolProbe(port, instanceId),
+      lastRequestAgeMs: null,
+      // No self-reported pid from a boolean probe, so a caller-supplied
+      // `httpProbe` can never adopt. Conservative on purpose: adoption needs a
+      // pid it can trust, and this shim has none to give.
+      pid: null,
+    })
+  }
+  return defaultChildProbe
 }
 
 export function createMetaSupervisor(cfg: MetaSupervisorConfig): MetaSupervisor {
@@ -218,23 +326,341 @@ export function createMetaSupervisor(cfg: MetaSupervisorConfig): MetaSupervisor 
   const intervalMs = cfg.intervalMs ?? DEFAULT_INTERVAL_MS
   const policy = cfg.policy ?? DEFAULT_POLICY
   const now = cfg.now ?? ((): number => Date.now())
-  const probe = cfg.httpProbe ?? defaultHttpProbe
+  const probe = resolveProbe(cfg)
+  const portInUse = cfg.isPortInUse ?? isPortInUse
+  const forceStopPid =
+    cfg.forceStopPid ??
+    ((pid: number): void =>
+      runRestartCommand(buildStopCommand(process.platform, pid), {
+        timeoutMs: FORCE_STOP_TIMEOUT_MS,
+      }))
   const live = new Map<string, LiveChild>()
   const restartHistory = new Map<string, number[]>()
   const lastRestart = new Map<string, number>()
+  /**
+   * Ms since each child last served a non-monitoring request, as of its last
+   * SUCCESSFUL probe. A project is absent until a probe actually reports the
+   * figure, and `planTick` never reaps on an absent entry — so a child the
+   * supervisor cannot reach, or one too old to report it, keeps running.
+   */
+  const lastRequestAgeMs = new Map<string, number>()
+  /**
+   * PIDs we are deliberately stopping, keyed by pid and NOT by projectId.
+   *
+   * This set is the fix for the bug that made stopping a child impossible: the
+   * exit handler below used to record EVERY exit as `failing`, including an
+   * exit we asked for. `planForProject` treats `failing` as restart-worthy, so
+   * a deliberate stop was overwritten within one tick and the child came
+   * straight back — 12 of them did exactly that, within 50 seconds, when they
+   * were stopped by hand.
+   *
+   * Keyed by PID because a project can have two processes in flight at once. A
+   * projectId-keyed flag was consumed by whichever exit fired first: a stale
+   * blue's exit would take the flag, return at the live-map pid guard without
+   * using it, and the SURVIVING child's later exit would then see
+   * `deliberate === false` and write `failing` — reintroducing the exact bug
+   * this commit exists to kill. A pid is unambiguous about which process the
+   * intent was about.
+   *
+   * Only ever added for a process we actually hold a handle to and actually
+   * signal, so an entry cannot leak for a stop that never happened.
+   */
+  const intentionalStops = new Set<number>()
+  /**
+   * When a reap was last ATTEMPTED per project, successful or not. A refused
+   * reap must not be retried every tick: the escalation below can spend
+   * seconds per attempt, ticks are serial, and hammering it would make exactly
+   * the loaded machine that caused the refusal worse.
+   */
+  const lastReapAttempt = new Map<string, number>()
+  /**
+   * Per project, an adopted pid that was later found dead. Keeps a port that
+   * keeps answering from re-adopting the same unusable pid every tick — see
+   * `adoptChild`. Cleared whenever a different pid is adopted or spawned.
+   */
+  const prunedAdoptions = new Map<string, number>()
   let timer: ReturnType<typeof setTimeout> | null = null
   let stopped = false
+
+  const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
+
+  /** Signal a child, whether we spawned it or adopted it. */
+  function signalChild(child: LiveChild, sig: NodeJS.Signals): void {
+    if (child.proc) child.proc.kill(sig)
+    else process.kill(child.pid, sig)
+  }
+
+  /**
+   * Has this child gone?
+   *
+   * A spawned child answers from its own process object. An ADOPTED one has no
+   * such object, so liveness is a pid probe — which is why the port check in
+   * `stopChildVerified` matters even more for adopted children: a pid probe
+   * can be fooled by pid reuse, a bound port cannot.
+   */
+  function childHasExited(child: LiveChild): boolean {
+    if (child.proc) return child.proc.exitCode !== null || child.proc.signalCode !== null
+    return !isPidAlive(child.pid)
+  }
+
+  /**
+   * Take management of a child that is already running and has proved, over an
+   * identity-checked probe, that it belongs to this project.
+   *
+   * This is the answer to a gap that produced two separate failures:
+   *
+   *  - A child spawned `detached:false` SURVIVES a non-clean supervisor
+   *    restart on Windows. The new supervisor starts with an empty `live` map
+   *    while the orphan serves happily on the anchored port, so nothing could
+   *    ever stop it — the exact resource leak idle reaping exists to remove.
+   *  - An unverified suspension leaves a row whose pinned port is held by the
+   *    child we failed to kill, and `spawnChild` then refuses every retry
+   *    forever.
+   *
+   * Both were previously "refuse and hope". Refusal was right only because the
+   * supervisor could not tell "my own child is on that port" from "a stranger
+   * is on that port" — and spawning a second broker onto one project's SQLite
+   * DB is worse than either. A probe that echoes this project's `instance_id`
+   * settles exactly that question, so adoption is the refusal's missing arm,
+   * not a replacement for it.
+   *
+   * `pid` is the child's SELF-REPORTED pid, never the registry's advisory
+   * `child_pid`. Without a trustworthy pid the child can be routed to but not
+   * stopped, so adoption refuses rather than record a child it cannot manage.
+   *
+   * @returns false when the child was NOT adopted.
+   */
+  function adoptChild(projectId: string, port: number, instanceId: string, pid: number): boolean {
+    // Adoption is established from a PORT probe; `pruneDeadAdopted` later
+    // judges the same child by a PID probe. Where they disagree, the PORT wins
+    // for routing — a port answering with the right identity is a broker that
+    // is genuinely serving, whatever a pid probe says — but the disagreement
+    // must not become a loop: adopt, prune, adopt, prune, each pass writing to
+    // the registry at tick rate. Remembering the pid we already pruned bounds
+    // it to one adoption per distinct pid.
+    //
+    // A pid we cannot signal is still safe to hold: `stopChildVerified` checks
+    // the port as well, so a reap against such a child REFUSES rather than
+    // recording a stop that did not happen.
+    if (prunedAdoptions.get(projectId) === pid) {
+      log.debug(
+        { projectId, port, pid },
+        'meta-supervisor: not re-adopting a pid already pruned as dead for this project',
+      )
+      return false
+    }
+    log.warn(
+      { projectId, port, pid, instanceId },
+      'meta-supervisor: adopting an already-running child for this project (identity verified) ' +
+        '— it survived a previous supervisor, or outlived a stop we could not complete',
+    )
+    live.set(projectId, { proc: null, pid, port, instanceId })
+    lastReapAttempt.delete(projectId)
+    prunedAdoptions.delete(projectId)
+    try {
+      resetHealthFailures(cfg.db, projectId)
+      updateChildState(cfg.db, projectId, {
+        status: 'running',
+        boundPort: port,
+        childPid: pid,
+        instanceId,
+        lastSeenAt: new Date().toISOString(),
+      })
+      // The adopted child's own address becomes the anchor again. It is
+      // serving on it, so it is by definition the right one.
+      persistDesiredPort(cfg.db, projectId, port)
+    } catch {
+      /* project may have been removed */
+    }
+    return true
+  }
+
+  /**
+   * Drop adopted entries whose process has gone.
+   *
+   * A spawned child's `exit` event clears `live`. An adopted child has no exit
+   * event, so without this sweep a dead adopted entry would linger and block
+   * the `spawn` action (`if (!live.has(...))`) forever.
+   */
+  function pruneDeadAdopted(): void {
+    for (const [projectId, child] of live) {
+      if (child.proc === null && !isPidAlive(child.pid)) {
+        log.info(
+          { projectId, pid: child.pid },
+          'meta-supervisor: adopted child is gone — releasing the live slot',
+        )
+        live.delete(projectId)
+        lastRequestAgeMs.delete(projectId)
+        // Remember WHICH pid went, so a port that keeps answering cannot make
+        // us re-adopt the same dead pid on every tick. See `adoptChild`.
+        prunedAdoptions.set(projectId, child.pid)
+      }
+    }
+  }
+
+  /** Poll `predicate` until true or the deadline passes. */
+  async function waitUntil(predicate: () => boolean, timeoutMs: number): Promise<boolean> {
+    const deadline = now() + timeoutMs
+    while (!predicate() && now() < deadline) {
+      await sleep(STOP_POLL_MS)
+    }
+    return predicate()
+  }
+
+  /** Poll until the port is bindable again, or the deadline passes. */
+  async function waitForPortFree(port: number, timeoutMs: number): Promise<boolean> {
+    const deadline = now() + timeoutMs
+    for (;;) {
+      if (!(await portInUse(port))) return true
+      if (now() >= deadline) return false
+      await sleep(STOP_POLL_MS)
+    }
+  }
+
+  /**
+   * Stop a child and PROVE it stopped. Returns false when it could not.
+   *
+   * The thing this exists to prevent: writing a terminal-ish row for a kill
+   * that never landed. A `stopped` row says the port is free, and `spawnChild`
+   * refuses to respawn onto an occupied port — so a reap that only *claimed*
+   * to kill left the project permanently unspawnable. Every wake then failed,
+   * `/api/meta/resolve` never returned `resolved:true`, and the session latched
+   * `global:fallback`: writes refused for its whole life, which is the precise
+   * outcome this feature was supposed to make impossible.
+   *
+   * Verification is deliberately TWO checks, because either alone is a lie:
+   *   - the process object reports it exited, AND
+   *   - the bound port is bindable again.
+   * The port check is the load-bearing one: it is the identical condition
+   * `spawnChild` tests, so passing it means the respawn can actually succeed.
+   *
+   * Escalation mirrors the contract `createPlatformRestarter` established —
+   * signal, wait, escalate, and REFUSE rather than proceed on an unverified
+   * stop.
+   */
+  async function stopChildVerified(
+    projectId: string,
+    boundPort: number | null,
+  ): Promise<{ stopped: boolean; detail: string }> {
+    const child = live.get(projectId)
+    const pid = child?.pid
+    if (!child || pid === undefined) {
+      // No handle, nothing to kill. Refusing is the whole point: the registry
+      // row must never claim a stop the supervisor did not perform. Reaching
+      // here now means adoption also declined — the occupant did not prove it
+      // belongs to this project — so refusing is doubly correct.
+      return {
+        stopped: false,
+        detail:
+          'no tracked child process for this project — refusing to record a stop that did ' +
+          'not happen (orphan that could not be identity-verified?)',
+      }
+    }
+
+    // An adopted child has no exit event to consume the flag, so marking one
+    // would leak. The flag exists solely to stop `claimChild`'s exit handler
+    // writing `failing` over a deliberate stop; a child with no such handler
+    // needs no flag.
+    if (child.proc !== null) intentionalStops.add(pid)
+    const notes: string[] = [child.proc === null ? 'adopted' : 'spawned']
+    const exited = (): boolean => childHasExited(child)
+
+    const signal = (sig: NodeJS.Signals): void => {
+      try {
+        signalChild(child, sig)
+        notes.push(sig)
+      } catch (err) {
+        notes.push(`${sig} failed: ${err instanceof Error ? err.message : String(err)}`)
+      }
+    }
+
+    signal('SIGTERM')
+    await waitUntil(exited, STOP_GRACE_MS)
+    if (!exited()) {
+      signal('SIGKILL')
+      await waitUntil(exited, STOP_GRACE_MS)
+    }
+    if (!exited()) {
+      // Last resort, same command the restart path uses. Synchronous and
+      // bounded; only reached when both signals failed, which is rare.
+      try {
+        forceStopPid(pid)
+        notes.push('force-stop')
+      } catch (err) {
+        notes.push(`force-stop failed: ${err instanceof Error ? err.message : String(err)}`)
+      }
+      await waitUntil(exited, STOP_GRACE_MS)
+    }
+
+    if (!exited()) {
+      if (child.proc !== null) intentionalStops.delete(pid)
+      return {
+        stopped: false,
+        detail: `pid ${pid} still alive after SIGTERM/SIGKILL/force-stop (${notes.join('; ')})`,
+      }
+    }
+
+    if (boundPort !== null && !(await waitForPortFree(boundPort, PORT_RELEASE_GRACE_MS))) {
+      // The process is gone but something still holds its port — a surviving
+      // grandchild, or a socket not yet released. Recording `stopped` here
+      // would produce the same unspawnable project as not killing at all.
+      if (child.proc !== null) intentionalStops.delete(pid)
+      return {
+        stopped: false,
+        detail: `pid ${pid} exited but port ${boundPort} is still occupied (${notes.join('; ')})`,
+      }
+    }
+
+    live.delete(projectId)
+    lastRequestAgeMs.delete(projectId)
+    return { stopped: true, detail: notes.join('; ') }
+  }
 
   async function spawnChild(projectId: string, projectRoot: string): Promise<void> {
     const project = getProject(cfg.db, projectId)
     const anchored = project ? stickyDesiredPort(project) : undefined
     if (
       anchored !== undefined &&
-      (takenPortsFor(projectId).has(anchored) || (await isPortInUse(anchored)))
+      (takenPortsFor(projectId).has(anchored) || (await portInUse(anchored)))
     ) {
-      throw new Error(
-        `Project ${projectId} port ${anchored} is occupied; refusing to change its address`,
-      )
+      // ADOPT, or refuse — never reallocate.
+      //
+      // Taking a fresh port here is the obvious cure and the wrong one: the
+      // most likely occupant of a project's OWN anchor is that project's OWN
+      // surviving child, and a second broker on one per-project SQLite DB is
+      // worse than a project that will not start. `same-port-recovery.test.ts`
+      // ("never silently reallocates an occupied anchor on a cold start")
+      // encodes that, and it still holds.
+      //
+      // What was missing was the other arm. If the occupant PROVES it is this
+      // project's child — answering `/api/health` with the `instance_id` this
+      // row stores — then the right move is neither to refuse nor to start a
+      // rival, but to take it over.
+      //
+      // A row with no stored `instance_id` has nothing to verify against and
+      // is refused unchanged. That is the cold-start case, and it is why the
+      // pre-existing invariant survives this change intact.
+      const identity = project?.instanceId ?? null
+      if (identity !== null) {
+        const seen = await probe(anchored, identity)
+        if (seen.ok && isUsablePid(seen.pid) && adoptChild(projectId, anchored, identity, seen.pid))
+          return
+        if (seen.ok && !isUsablePid(seen.pid)) {
+          log.warn(
+            { projectId, anchored },
+            'meta-supervisor: the occupant of this anchor identified itself but reported no ' +
+              'pid, so it cannot be managed — refusing rather than adopting a child we could ' +
+              'never stop (an older child broker predating the self-reported pid)',
+          )
+        }
+      }
+      const detail = `port ${anchored} is occupied by a process this supervisor could not identify as ${projectId}'s own child; refusing to spawn a second broker`
+      try {
+        recordHealthFailure(cfg.db, projectId, detail)
+      } catch {
+        /* project may have been removed */
+      }
+      throw new Error(detail)
     }
     const port = anchored ?? (await pickPort(projectId))
     const instanceId = randomUUID()
@@ -248,13 +674,20 @@ export function createMetaSupervisor(cfg: MetaSupervisorConfig): MetaSupervisor 
     port: number,
     instanceId: string,
   ): void {
-    live.set(projectId, { proc, port, instanceId })
+    live.set(projectId, { proc, pid: proc.pid ?? -1, port, instanceId })
     proc.on('exit', (code, signal) => {
-      log.info({ projectId, pid: proc.pid, code, signal }, 'meta-supervisor: child exited')
+      // Keyed by THIS process's pid, so a stale sibling's exit cannot consume
+      // the intent that belonged to a different process.
+      const deliberate = proc.pid !== undefined && intentionalStops.delete(proc.pid)
+      log.info(
+        { projectId, pid: proc.pid, code, signal, deliberate },
+        'meta-supervisor: child exited',
+      )
       // A swap deliberately replaces the live entry before stopping blue; blue's
       // exit must not then clear green's registry row.
-      if (live.get(projectId)?.proc.pid !== proc.pid) return
+      if (live.get(projectId)?.pid !== proc.pid) return
       live.delete(projectId)
+      if (deliberate) return
       try {
         updateChildState(cfg.db, projectId, {
           status: 'failing',
@@ -267,6 +700,11 @@ export function createMetaSupervisor(cfg: MetaSupervisorConfig): MetaSupervisor 
         /* project may have been removed */
       }
     })
+    // A child that is starting has no measured idleness yet; a stale reading
+    // from its previous life must not reap the new one on its first tick.
+    lastRequestAgeMs.delete(projectId)
+    lastReapAttempt.delete(projectId)
+    prunedAdoptions.delete(projectId)
     resetHealthFailures(cfg.db, projectId)
     updateChildState(cfg.db, projectId, {
       status: 'starting',
@@ -300,7 +738,7 @@ export function createMetaSupervisor(cfg: MetaSupervisorConfig): MetaSupervisor 
     return allocatePort({
       ...(desired !== undefined && !taken.has(desired) ? { desired } : {}),
       taken,
-      isPortInUse,
+      isPortInUse: portInUse,
     })
   }
 
@@ -376,8 +814,23 @@ export function createMetaSupervisor(cfg: MetaSupervisorConfig): MetaSupervisor 
 
   async function probeChild(projectId: string, port: number, instanceId: string): Promise<void> {
     try {
-      const ok = await probe(port, instanceId)
-      if (ok) {
+      const result = await probe(port, instanceId)
+      if (result.ok) {
+        // The orphan path. A successful probe has just PROVED that a process
+        // on this port carries this project's instance id; if we hold no
+        // handle for it, it survived a previous supervisor and is ours to
+        // take back. Without this, such a child is probed forever, never
+        // managed, and never reapable — the leak this feature exists to close.
+        if (!live.has(projectId) && isUsablePid(result.pid)) {
+          adoptChild(projectId, port, instanceId, result.pid)
+        }
+        // Record the demand signal ONLY on a verified-identity success. A
+        // failed probe leaves the previous reading in place rather than
+        // inventing one, and a child that never reports the field stays absent
+        // from the map — both of which mean "do not reap".
+        if (result.lastRequestAgeMs !== null) {
+          lastRequestAgeMs.set(projectId, result.lastRequestAgeMs)
+        }
         resetHealthFailures(cfg.db, projectId)
         // A port that passed identity verification is known-good: pin it so a
         // restart reclaims it instead of re-dealing the pool under live
@@ -386,7 +839,7 @@ export function createMetaSupervisor(cfg: MetaSupervisorConfig): MetaSupervisor 
         updateChildState(cfg.db, projectId, {
           status: 'running',
           boundPort: port,
-          childPid: live.get(projectId)?.proc.pid ?? null,
+          childPid: live.get(projectId)?.pid ?? null,
           instanceId,
           lastSeenAt: new Date().toISOString(),
         })
@@ -404,7 +857,7 @@ export function createMetaSupervisor(cfg: MetaSupervisorConfig): MetaSupervisor 
           updateChildState(cfg.db, projectId, {
             status: proj.healthFailures >= policy.minFailures ? 'failing' : proj.status,
             boundPort: port,
-            childPid: live.get(projectId)?.proc.pid ?? null,
+            childPid: live.get(projectId)?.pid ?? null,
             instanceId,
             lastSeenAt: new Date().toISOString(),
           })
@@ -465,18 +918,18 @@ export function createMetaSupervisor(cfg: MetaSupervisorConfig): MetaSupervisor 
       autoApproveThreshold: proj.autoApproveThreshold,
       selfIssueRepo: proj.selfIssueRepo,
     })
-    const ownedChildAlive = (): boolean =>
-      child !== undefined && child.proc.exitCode === null && child.proc.signalCode === null
+    const ownedChildAlive = (): boolean => child !== undefined && !childHasExited(child)
     const result = await createPlatformRestarter({
       platform: process.platform,
       strategy: 'relaunch',
       runCommand: runRestartCommand,
-      // Registry child_pid is advisory; only terminate our own tracked child.
-      readLivePid: () => (ownedChildAlive() ? (child?.proc.pid ?? null) : null),
+      // Registry child_pid is advisory; only terminate our own tracked child —
+      // which, for an adopted one, is a pid it reported about itself.
+      readLivePid: () => (ownedChildAlive() ? (child?.pid ?? null) : null),
       stopPid: (pid) =>
         runRestartCommand(buildStopCommand(process.platform, pid), { timeoutMs: 15_000 }),
-      isAlive: (pid) => child?.proc.pid === pid && ownedChildAlive(),
-      isPortInUse: async () => takenPortsFor(projectId).has(port) || (await isPortInUse(port)),
+      isAlive: (pid) => child?.pid === pid && ownedChildAlive(),
+      isPortInUse: async () => takenPortsFor(projectId).has(port) || (await portInUse(port)),
       spawnSpec: { command: process.execPath, ...spec },
       spawnBroker: () => {
         const proc = launchChild(projectId, proj.projectRoot, port, instanceId)
@@ -567,47 +1020,127 @@ export function createMetaSupervisor(cfg: MetaSupervisorConfig): MetaSupervisor 
     )
   }
 
-  function suspendChild(projectId: string, reason: string): void {
-    const child = live.get(projectId)
-    if (child) {
-      const proc = child.proc
-      proc.kill('SIGTERM')
-      // Escalate if it survives the grace. A suspended child that keeps running
-      // holds the project's data.db open and squats the desired_port anchor, so
-      // every failed-retry spawn refuses on port occupancy until it dies.
-      // Fire-and-forget (and unref'd): suspension itself must not block the
-      // serial tick loop.
-      setTimeout(() => {
-        if (proc.exitCode === null && proc.signalCode === null) {
-          log.warn(
-            { projectId, pid: proc.pid },
-            'meta-supervisor: suspended child survived SIGTERM — escalating to SIGKILL',
-          )
-          try {
-            proc.kill('SIGKILL')
-          } catch {
-            /* already gone */
-          }
-        }
-      }, SUSPEND_KILL_GRACE_MS).unref?.()
-      live.delete(projectId)
-    }
+  async function suspendChild(projectId: string, reason: string): Promise<void> {
     log.warn(
       { projectId, reason },
       'meta-supervisor: suspending child — automatic retry after the failed-retry backoff ' +
         '(`scns meta reset` retries now)',
     )
+    // Best-effort, NOT verified — deliberately unlike the reap below.
+    //
+    // The two are asymmetric because they assert different things. A reap is
+    // OPTIONAL (nothing is wrong; we merely want the memory back), so when its
+    // stop cannot be verified the honest answer is to do nothing at all. A
+    // suspension is a HEALTH VERDICT reached by exhausting the restart budget:
+    // the project is already failing, and refusing to record the verdict would
+    // leave the row `failing`, which `planForProject` re-decides as `suspend`
+    // on every single tick — up to 20s of serial stop escalation each, forever.
+    // Recording it is the lesser harm.
+    //
+    // It IS still a harm, and it is now RECOVERABLE rather than terminal: the
+    // row keeps the surviving child's identity, so the next retry can probe
+    // the occupant of its anchor and ADOPT it (see `spawnChild`) instead of
+    // refusing forever. If the survivor cannot be identified — it is wedged
+    // and no longer answers, or it is a stranger — the refusal stands and is
+    // recorded on the row for an operator.
+    await stopChildDeliberately(projectId, { status: 'failed' }, reason, {
+      requireVerifiedStop: false,
+    })
+  }
+
+  /**
+   * Park a child nobody is using.
+   *
+   * `stopped` is the only status that stays down, which is exactly what this
+   * needs — `registered` respawns immediately and `failed` respawns after the
+   * retry backoff, so both would make the reap a no-op. What makes `stopped`
+   * safe to use here (it is otherwise terminal operator intent) is
+   * `stopped_reason = 'idle'`: `/api/meta/resolve` recognises it, answers the
+   * RETRYABLE `child-idle`, and wakes the row on demand. An idle-reaped project
+   * therefore costs a session a cold start, never a `global:fallback` latch.
+   */
+  async function stopIdleChild(projectId: string, reason: string): Promise<void> {
+    lastReapAttempt.set(projectId, now())
+    log.info({ projectId, reason }, 'meta-supervisor: reaping idle child (wakes on demand)')
+    await stopChildDeliberately(projectId, { status: 'stopped', stoppedReason: 'idle' }, reason, {
+      requireVerifiedStop: true,
+    })
+  }
+
+  /**
+   * The one way to take a child down on purpose.
+   *
+   * With `requireVerifiedStop`, the stop is PROVED before anything is written.
+   * An earlier revision wrote the row before killing, to close the window in
+   * which the registry still claimed a killed process was `running`. That
+   * window is real but trivial; the window it opened instead was not. When the
+   * kill did not land — an orphan with no live handle, or a SIGTERM that does
+   * not take, both observed on this machine — the row asserted a stop that had
+   * not happened, the port stayed occupied, and `spawnChild` then refused every
+   * respawn forever. A project in that state can never resolve, so every
+   * session in it latches `global:fallback` and silently refuses writes for its
+   * whole life.
+   *
+   * So a reap we cannot verify is reported and ABANDONED, leaving the row
+   * `running` and the ordinary health machinery in charge of a child that is,
+   * after all, still running.
+   */
+  async function stopChildDeliberately(
+    projectId: string,
+    state: Pick<ProjectChildState, 'status' | 'stoppedReason'>,
+    reason: string,
+    opts: { readonly requireVerifiedStop: boolean },
+  ): Promise<boolean> {
+    const boundPort = live.get(projectId)?.port ?? getProject(cfg.db, projectId)?.boundPort ?? null
+    const outcome = await stopChildVerified(projectId, boundPort)
+    if (!outcome.stopped && opts.requireVerifiedStop) {
+      log.error(
+        { projectId, reason, detail: outcome.detail, boundPort },
+        'meta-supervisor: deliberate stop REFUSED — leaving the row untouched so the child ' +
+          'stays managed and its port stays claimed by the project that owns it',
+      )
+      return false
+    }
+    if (!outcome.stopped) {
+      log.warn(
+        { projectId, reason, detail: outcome.detail },
+        'meta-supervisor: stop could not be verified, but the state is a health verdict and ' +
+          'is recorded anyway — PRESERVING the runtime identity of the surviving process',
+      )
+      // Keep `bound_port`, `child_pid` and `instance_id`. They describe a
+      // process that demonstrably still exists, so erasing them is simply
+      // false — and it is the erasure, not the `failed` status, that used to
+      // strand the project: with no stored `instance_id` the next spawn had
+      // nothing to verify the port's occupant against, so it could only
+      // refuse, forever. Preserved identity lets `spawnChild` recognise the
+      // survivor and ADOPT it instead.
+      const surviving = live.get(projectId)
+      const row = getProject(cfg.db, projectId)
+      try {
+        updateChildState(cfg.db, projectId, {
+          ...state,
+          boundPort: surviving?.port ?? row?.boundPort ?? null,
+          childPid: surviving?.pid ?? row?.childPid ?? null,
+          instanceId: surviving?.instanceId ?? row?.instanceId ?? null,
+          lastSeenAt: new Date().toISOString(),
+        })
+      } catch {
+        /* removed concurrently */
+      }
+      return true
+    }
     try {
       updateChildState(cfg.db, projectId, {
-        status: 'failed',
+        ...state,
         boundPort: null,
         childPid: null,
         instanceId: null,
         lastSeenAt: new Date().toISOString(),
       })
     } catch {
-      /* removed concurrently */
+      /* removed concurrently — the child is already down either way */
     }
+    return true
   }
 
   /**
@@ -637,7 +1170,7 @@ export function createMetaSupervisor(cfg: MetaSupervisorConfig): MetaSupervisor 
               // unrelated process) — the swap must only ever stop a child this
               // supervisor owns. With no tracked child it degrades to 'no-blue':
               // green starts and the registry repoints, nothing is killed.
-              childPid: live.get(projectId)?.proc.pid ?? null,
+              childPid: live.get(projectId)?.pid ?? null,
               instanceId: live.get(projectId)?.instanceId ?? proj.instanceId,
               takenPorts: takenPortsFor(projectId),
             },
@@ -653,16 +1186,29 @@ export function createMetaSupervisor(cfg: MetaSupervisorConfig): MetaSupervisor 
         }
         return greenProc.pid ?? null
       },
-      probeChild: (port, instanceId) => probe(port, instanceId),
+      probeChild: (port, instanceId) => probe(port, instanceId).then((r) => r.ok),
       repoint: ({ boundPort, childPid, instanceId }) => {
         // Claim the live slot BEFORE the registry write, so blue's imminent
         // exit handler sees a different pid and leaves green's row alone.
         if (greenProc !== null) {
-          live.set(projectId, { proc: greenProc, port: boundPort, instanceId })
+          live.set(projectId, { proc: greenProc, pid: childPid, port: boundPort, instanceId })
+          // Green is a brand-new process with a brand-new demand clock; blue's
+          // last reading must not reap it on the next tick.
+          lastRequestAgeMs.delete(projectId)
+          lastReapAttempt.delete(projectId)
           greenProc.on('exit', (code, signal) => {
-            log.info({ projectId, pid: childPid, code, signal }, 'meta-supervisor: child exited')
-            if (live.get(projectId)?.proc.pid !== childPid) return
+            // Same pid-keyed guard as the primary handler. The swap itself
+            // never marks green (blue's stop is covered by the pid check
+            // below), but a later reap or suspend of THIS child must not be
+            // overwritten with `failing` just because it came up via a swap.
+            const deliberate = childPid !== undefined && intentionalStops.delete(childPid)
+            log.info(
+              { projectId, pid: childPid, code, signal, deliberate },
+              'meta-supervisor: child exited',
+            )
+            if (live.get(projectId)?.pid !== childPid) return
             live.delete(projectId)
+            if (deliberate) return
             try {
               updateChildState(cfg.db, projectId, {
                 status: 'failing',
@@ -738,11 +1284,15 @@ export function createMetaSupervisor(cfg: MetaSupervisorConfig): MetaSupervisor 
   }
 
   async function tickOnce(): Promise<void> {
+    // An adopted child has no exit event; this is its equivalent.
+    pruneDeadAdopted()
     const plan = planTick(cfg.db, {
       nowMs: now(),
       policy,
       restartHistoryByProject: restartHistory,
       lastRestartByProject: lastRestart,
+      idleMsByProject: lastRequestAgeMs,
+      lastReapAttemptByProject: lastReapAttempt,
     })
     for (const action of plan.actions) {
       try {
@@ -769,7 +1319,10 @@ export function createMetaSupervisor(cfg: MetaSupervisorConfig): MetaSupervisor 
             await restartChild(action.projectId)
             break
           case 'suspend':
-            suspendChild(action.projectId, action.reason)
+            await suspendChild(action.projectId, action.reason)
+            break
+          case 'stop-idle':
+            await stopIdleChild(action.projectId, action.reason)
             break
         }
       } catch (err) {
@@ -796,31 +1349,100 @@ export function createMetaSupervisor(cfg: MetaSupervisorConfig): MetaSupervisor 
       stopped = true
       if (timer) clearTimeout(timer)
       log.info({ children: live.size }, 'meta-supervisor: stopping')
-      for (const [projectId, child] of live) {
-        log.info({ projectId, pid: child.proc.pid }, 'meta-supervisor: SIGTERM child')
-        child.proc.kill('SIGTERM')
+
+      // Shutdown stops children in PARALLEL and does not route through
+      // `stopChildVerified`, deliberately. That path escalates with a 5s grace
+      // per step plus a 5s port-release wait — up to 20s PER CHILD, serially.
+      // Across the 16 children on this machine that is a five-minute
+      // shutdown, inside a signal handler with a bounded window. Signal
+      // everything, drain once, escalate once.
+      // Snapshot BEFORE signalling. A child that exits during the drain is
+      // removed from `live` by its own exit handler, so iterating `live`
+      // afterwards would skip exactly the children that shut down cleanly and
+      // leave their rows stuck at whatever the last tick wrote.
+      const shuttingDown = [...live.entries()]
+
+      for (const [projectId, child] of shuttingDown) {
+        log.info({ projectId, pid: child.pid }, 'meta-supervisor: SIGTERM child')
+        // Mark BEFORE the kill, same contract as every other deliberate stop.
+        // Without this, a clean supervisor shutdown wrote `failing` for every
+        // child as it exited during the drain window below — a false health
+        // verdict that spent restart budget and, worse, left routing claiming a
+        // child was unhealthy when it had simply been asked to leave.
+        // Adopted children have no exit handler, so they need no flag.
+        if (child.proc !== null) intentionalStops.add(child.pid)
+        try {
+          signalChild(child, 'SIGTERM')
+        } catch (err) {
+          log.warn({ err, projectId }, 'meta-supervisor: SIGTERM failed')
+        }
       }
+
       // Brief drain window.
-      await new Promise((r) => setTimeout(r, 1000))
-      for (const [projectId, child] of live) {
-        // `proc.killed` only records that a signal was SENT — it is set by the
-        // SIGTERM above and says nothing about whether the process exited, so
-        // gating on it made this escalation dead code and leaked any
-        // SIGTERM-resistant child on every supervisor shutdown. Exit state is
-        // the real check.
-        if (child.proc.exitCode === null && child.proc.signalCode === null) {
-          log.warn({ projectId, pid: child.proc.pid }, 'meta-supervisor: SIGKILL child after grace')
-          child.proc.kill('SIGKILL')
+      await sleep(1000)
+      for (const [projectId, child] of shuttingDown) {
+        if (!childHasExited(child)) {
+          log.warn({ projectId, pid: child.pid }, 'meta-supervisor: SIGKILL child after grace')
+          if (child.proc !== null) intentionalStops.add(child.pid)
+          try {
+            signalChild(child, 'SIGKILL')
+          } catch (err) {
+            log.warn({ err, projectId }, 'meta-supervisor: SIGKILL failed')
+          }
+        }
+      }
+      // Let a landed SIGKILL be observable before we decide what to record.
+      await sleep(STOP_POLL_MS * 2)
+
+      // Rows are written LAST, once the outcome per child is known.
+      //
+      // `registered` either way: it asserts intent ("this project should be
+      // running") rather than a health verdict, it is retryable in the
+      // extension, and the next supervisor spawns it on its first tick.
+      //
+      // What differs is the IDENTITY, and that difference is the whole fix.
+      // This used to null `instance_id` unconditionally — the identical
+      // erasure that `stopChildDeliberately` was changed to stop doing. With
+      // `desired_port` still pinned (updateChildState never touches it) and no
+      // stored identity, a child that survived its SIGTERM left a project that
+      // was permanently unspawnable AND permanently unadoptable: `spawnChild`
+      // found the anchor occupied, had nothing to verify the occupant against,
+      // and could only refuse — forever. Preserving the survivor's identity is
+      // what lets the next supervisor recognise it and adopt it.
+      for (const [projectId, child] of shuttingDown) {
+        const survived = !childHasExited(child)
+        if (survived) {
+          log.warn(
+            { projectId, pid: child.pid, port: child.port },
+            'meta-supervisor: child outlived shutdown — recording its identity so the next ' +
+              'supervisor can adopt it rather than refuse its anchor forever',
+          )
+        }
+        try {
+          updateChildState(cfg.db, projectId, {
+            status: 'registered',
+            boundPort: survived ? child.port : null,
+            childPid: survived ? child.pid : null,
+            instanceId: survived ? child.instanceId : null,
+            lastSeenAt: new Date().toISOString(),
+          })
+        } catch {
+          /* project may have been removed */
         }
       }
       live.clear()
+      lastRequestAgeMs.clear()
     },
     tickOnce,
     swapChild,
     livePids(): ReadonlyMap<string, number> {
       const out = new Map<string, number>()
       for (const [id, c] of live) {
-        if (c.proc.pid) out.set(id, c.proc.pid)
+        // Filter non-positive pids, restoring the guard the old
+        // `if (c.proc.pid)` form provided. `claimChild` falls back to -1 when
+        // a spawned proc somehow has no pid, and a sentinel must not escape
+        // through a public accessor.
+        if (c.pid > 0) out.set(id, c.pid)
       }
       return out
     },
@@ -828,6 +1450,23 @@ export function createMetaSupervisor(cfg: MetaSupervisorConfig): MetaSupervisor 
 }
 
 export async function defaultHttpProbe(port: number, instanceId: string): Promise<boolean> {
+  return (await defaultChildProbe(port, instanceId)).ok
+}
+
+/**
+ * The real identity-checked health probe, returning everything one call can
+ * learn. `defaultHttpProbe` is the boolean shim over it, kept because callers
+ * and tests already depend on that signature.
+ *
+ * One HTTP call, not two: the demand signal rides along in the payload the
+ * supervisor was already fetching every tick, so idle reaping costs no extra
+ * traffic against a live child.
+ */
+export async function defaultChildProbe(
+  port: number,
+  instanceId: string,
+): Promise<ChildProbeResult> {
+  const miss: ChildProbeResult = { ok: false, lastRequestAgeMs: null, pid: null }
   try {
     // The child inherits this supervisor's env, so its auth middleware is
     // keyed on the SAME BROKER_TOKEN we read here (broker/server.ts). The
@@ -835,20 +1474,33 @@ export async function defaultHttpProbe(port: number, instanceId: string): Promis
     // is NOT exempt, so a tokenless probe 401s and the child would be killed
     // and respawned forever. Tokenless setups send no header, as before.
     const token = process.env.BROKER_TOKEN?.trim()
+    // `x-scns-meta-probe` tells the child this is supervision traffic, so it
+    // does NOT count as demand (broker/request-activity.ts). Without that, the
+    // 5-second probe cadence would hold every child permanently "busy" and
+    // idle reaping would never fire once.
     const headers: Record<string, string> = { 'x-scns-meta-probe': '1' }
     if (token) headers['Authorization'] = `Bearer ${token}`
     const res = await fetch(`http://127.0.0.1:${port}/api/health`, {
       headers,
       signal: AbortSignal.timeout(5_000),
     })
-    if (!res.ok) return false
+    if (!res.ok) return miss
     const body = (await res.json()) as Record<string, unknown>
     // Identity verification: child must echo back its SCNS_INSTANCE_ID
     // in the health payload. Without this, a stale process / port-squatter
     // could falsely pass a green check.
     const echoed = typeof body['instance_id'] === 'string' ? (body['instance_id'] as string) : null
-    return echoed === instanceId
+    if (echoed !== instanceId) return miss
+    const ageSeconds = body['last_request_age_seconds']
+    const lastRequestAgeMs =
+      typeof ageSeconds === 'number' && Number.isFinite(ageSeconds) && ageSeconds >= 0
+        ? ageSeconds * 1000
+        : null
+    const reported = body['pid']
+    const pid =
+      typeof reported === 'number' && Number.isInteger(reported) && reported > 0 ? reported : null
+    return { ok: true, lastRequestAgeMs, pid }
   } catch {
-    return false
+    return miss
   }
 }

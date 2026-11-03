@@ -27,12 +27,43 @@ import { isAbsolutePath, resolveDeepestRootIndex, type PlatformPath } from '../s
 
 export type ProjectStatus = 'registered' | 'starting' | 'running' | 'failing' | 'failed' | 'stopped'
 
+/**
+ * Why a project is `stopped`. Lives in its own nullable column rather than as
+ * a seventh `status` value because `status` carries a CHECK constraint, and
+ * `CREATE TABLE IF NOT EXISTS` does not alter an existing table — adding
+ * `'idle'` to the enum would throw on every registry DB already on disk.
+ *
+ *  - `'idle'`     — reaped by the supervisor after the idle timeout. NOT
+ *                   terminal: `/api/meta/resolve` wakes it on demand, so a
+ *                   session that needs the broker gets it back.
+ *  - `'operator'` — a human stopped it. Terminal until `meta-broker reset`.
+ *
+ * `null` means "stopped by something that did not say why" — an older build, a
+ * hand-edited row. Treated as operator intent, i.e. terminal: the safe reading
+ * of an unexplained stop is that someone meant it.
+ */
+export type StoppedReason = 'idle' | 'operator'
+
 export interface ProjectRow {
   readonly projectId: string
   readonly projectRoot: string
   readonly desiredPort: number | null
   readonly boundPort: number | null
   readonly status: ProjectStatus
+  /**
+   * Set only while `status === 'stopped'`; cleared by any transition out of it
+   * (see {@link updateChildState}). Null on every non-stopped row.
+   */
+  readonly stoppedReason: StoppedReason | null
+  /**
+   * When `/api/meta/resolve` last handed this project's broker URL to a
+   * session. Demand evidence the CHILD cannot see: resolve is served by the
+   * global broker and never contacts the child, so a session that resolves and
+   * has not yet spoken is invisible to the child's own request clock. Folded
+   * into the idle decision by `supervisor-tick.effectiveIdleMs`, where it may
+   * only ever shorten the idle age.
+   */
+  readonly lastResolvedAt: string | null
   readonly instanceId: string | null
   readonly childPid: number | null
   readonly lastSeenAt: string | null
@@ -67,6 +98,12 @@ export interface ProjectChildState {
   readonly childPid: number | null
   readonly instanceId: string | null
   readonly lastSeenAt: string | null
+  /**
+   * Only meaningful when `status === 'stopped'`. Any other status writes NULL
+   * regardless of what is passed, so a woken or respawned child can never keep
+   * a stale "I was idle-reaped" marker and be refused by routing.
+   */
+  readonly stoppedReason?: StoppedReason | null
 }
 
 interface RawRow {
@@ -75,6 +112,10 @@ interface RawRow {
   readonly desired_port: number | null
   readonly bound_port: number | null
   readonly status: ProjectStatus
+  /** Absent (undefined) on a registry DB that predates the column. */
+  readonly stopped_reason?: StoppedReason | null
+  /** Absent (undefined) on a registry DB that predates the column. */
+  readonly last_resolved_at?: string | null
   readonly instance_id: string | null
   readonly child_pid: number | null
   readonly last_seen_at: string | null
@@ -95,6 +136,8 @@ CREATE TABLE IF NOT EXISTS projects (
   bound_port      INTEGER,
   status          TEXT NOT NULL DEFAULT 'registered'
                   CHECK (status IN ('registered','starting','running','failing','failed','stopped')),
+  stopped_reason  TEXT,
+  last_resolved_at TEXT,
   instance_id     TEXT,
   child_pid       INTEGER,
   last_seen_at    TEXT,
@@ -125,6 +168,20 @@ export function applyMetaSchema(db: Database.Database): void {
   if (!cols.has('self_issue_repo')) {
     db.exec('ALTER TABLE projects ADD COLUMN self_issue_repo TEXT')
   }
+  // Idle reaping — why a `stopped` row is stopped. Deliberately a separate
+  // nullable column and NOT a new `status` value: `status` has a CHECK
+  // constraint baked into CREATE TABLE, and `CREATE TABLE IF NOT EXISTS` is a
+  // no-op against the tables already on disk, so a seventh enum member would
+  // fail the constraint on every existing registry. A plain additive column
+  // migrates cleanly and reads as NULL (= terminal) on old rows.
+  if (!cols.has('stopped_reason')) {
+    db.exec('ALTER TABLE projects ADD COLUMN stopped_reason TEXT')
+  }
+  // Idle reaping — demand evidence from `/api/meta/resolve`, which the child
+  // itself cannot observe. Same additive pattern, same reason.
+  if (!cols.has('last_resolved_at')) {
+    db.exec('ALTER TABLE projects ADD COLUMN last_resolved_at TEXT')
+  }
 }
 
 function rowToProject(r: RawRow): ProjectRow {
@@ -134,6 +191,12 @@ function rowToProject(r: RawRow): ProjectRow {
     desiredPort: r.desired_port,
     boundPort: r.bound_port,
     status: r.status,
+    // `?? null` is load-bearing: `/api/meta/resolve` opens the registry
+    // read-only and never migrates it, so a `SELECT *` against a DB written by
+    // an older build yields `undefined` here. Null reads as "no stated reason"
+    // → terminal, which is the safe default for an unexplained stop.
+    stoppedReason: r.stopped_reason ?? null,
+    lastResolvedAt: r.last_resolved_at ?? null,
     instanceId: r.instance_id,
     childPid: r.child_pid,
     lastSeenAt: r.last_seen_at,
@@ -259,10 +322,85 @@ export function resetProject(db: Database.Database, projectId: string): boolean 
            child_pid = NULL,
            last_seen_at = NULL,
            last_error = NULL,
+           stopped_reason = NULL,
            updated_at = datetime('now')
          WHERE project_id = ? AND status IN ('failed','stopped')`,
       )
       .run(projectId).changes > 0
+  )
+}
+
+/**
+ * Demand-driven wake for an idle-reaped child.
+ *
+ * Called from `/api/meta/resolve` the instant a session asks for a project
+ * whose broker was reaped for idleness: flipping it back to `registered` is
+ * what makes the next supervisor tick spawn it. Without this the reap would be
+ * a one-way door, the session would see a non-retryable reason, and it would
+ * latch `global:fallback` — refusing every memory write for its whole life,
+ * which is the exact failure SCNS exists to prevent.
+ *
+ * The `stopped_reason = 'idle'` guard in the WHERE clause is the safety
+ * property, not a nicety: an operator stop (reason `'operator'` or NULL) is
+ * deliberate intent and MUST stay terminal, so no amount of session traffic can
+ * resurrect it. The guard also makes the call idempotent and race-free — N
+ * sessions resolving at once produce one transition and N-1 no-ops.
+ *
+ * `desired_port` is left alone so the woken child reclaims its own address.
+ *
+ * @returns true when this call performed the wake.
+ */
+export function wakeIdleProject(db: Database.Database, projectId: string): boolean {
+  return (
+    db
+      .prepare(
+        `UPDATE projects SET
+         status = 'registered',
+         health_failures = 0,
+         stopped_reason = NULL,
+         last_error = NULL,
+         updated_at = datetime('now')
+       WHERE project_id = ? AND status = 'stopped' AND stopped_reason = 'idle'`,
+      )
+      .run(projectId).changes > 0
+  )
+}
+
+/**
+ * Record that a session was just handed this project's broker URL.
+ *
+ * Closes a blind spot in the idle signal: `/api/meta/resolve` runs on the
+ * GLOBAL broker and never contacts the child, so a session that resolves at
+ * 3h59m is invisible to the child's own request clock and its broker can be
+ * reaped out from under it seconds later. The session recovers, but its first
+ * write is refused — and near every idle boundary, it would happen again.
+ *
+ * Throttled by `minIntervalMs`: resolves cluster at session start, and the
+ * value only needs to be accurate to within far less than the idle timeout.
+ * Skipping the write when the stamp is already fresh keeps the hot resolve
+ * path free of a disk write in the common case.
+ *
+ * @returns true when a write was actually performed.
+ */
+export function recordProjectResolved(
+  db: Database.Database,
+  projectId: string,
+  opts: { readonly nowMs?: number; readonly minIntervalMs?: number } = {},
+): boolean {
+  const nowMs = opts.nowMs ?? Date.now()
+  const minIntervalMs = opts.minIntervalMs ?? 60_000
+  const row = db
+    .prepare('SELECT last_resolved_at AS t FROM projects WHERE project_id = ?')
+    .get(projectId) as { t: string | null } | undefined
+  if (row === undefined) return false
+  if (row.t !== null) {
+    const prev = Date.parse(row.t)
+    if (!Number.isNaN(prev) && nowMs - prev < minIntervalMs) return false
+  }
+  return (
+    db
+      .prepare('UPDATE projects SET last_resolved_at = @at WHERE project_id = @projectId')
+      .run({ projectId, at: new Date(nowMs).toISOString() }).changes > 0
   )
 }
 
@@ -300,10 +438,16 @@ export function updateChildState(
   projectId: string,
   state: ProjectChildState,
 ): void {
+  // Clearing the reason on every non-stopped write is the invariant that keeps
+  // a woken child routable: if a respawn left `stopped_reason = 'idle'` behind,
+  // the row would still read as idle-reaped and `/api/meta/resolve` would keep
+  // answering `child-idle` for a broker that is up and serving.
+  const stoppedReason = state.status === 'stopped' ? (state.stoppedReason ?? null) : null
   const result = db
     .prepare(
       `UPDATE projects SET
          status = @status,
+         stopped_reason = @stoppedReason,
          bound_port = @boundPort,
          child_pid = @childPid,
          instance_id = @instanceId,
@@ -314,6 +458,7 @@ export function updateChildState(
     .run({
       projectId,
       status: state.status,
+      stoppedReason,
       boundPort: state.boundPort,
       childPid: state.childPid,
       instanceId: state.instanceId,

@@ -10,6 +10,9 @@
  *   - restart — failing child crossed the restart-policy threshold
  *   - suspend — failing child exceeded max-restarts/window (retried after the
  *               failed-retry backoff; `meta reset` retries immediately)
+ *   - stop-idle — healthy child that nothing has talked to for the idle
+ *               timeout; stopped and parked as `stopped`/`idle` until a
+ *               session asks for it again
  *
  * Keeping this pure makes the orchestrator trivially testable. Side effects
  * (process.fork, HTTP requests, signal handling) live entirely in
@@ -29,6 +32,13 @@ export type TickAction =
     }
   | { readonly kind: 'restart'; readonly projectId: string; readonly reason: string }
   | { readonly kind: 'suspend'; readonly projectId: string; readonly reason: string }
+  | {
+      readonly kind: 'stop-idle'
+      readonly projectId: string
+      readonly reason: string
+      /** How long the child had gone without a request, per the last probe. */
+      readonly idleMs: number
+    }
 
 export interface TickPlan {
   readonly actions: ReadonlyArray<TickAction>
@@ -45,6 +55,18 @@ export interface TickPolicy {
    * keep compiling; defaults to {@link DEFAULT_FAILED_RETRY_BACKOFF_MS}.
    */
   readonly failedRetryBackoffMs?: number
+  /**
+   * How long a healthy child may go without serving a single non-monitoring
+   * request before the supervisor stops it. Optional so existing policy
+   * literals keep compiling; defaults to {@link DEFAULT_IDLE_TIMEOUT_MS}.
+   * Set to 0 to disable idle reaping entirely.
+   */
+  readonly idleTimeoutMs?: number
+  /**
+   * How long after a REFUSED reap before another is attempted for the same
+   * project. Defaults to {@link DEFAULT_REAP_COOLDOWN_MS}.
+   */
+  readonly reapCooldownMs?: number
 }
 
 /**
@@ -56,6 +78,35 @@ export interface TickPolicy {
  * stall is back within minutes rather than waiting for an operator.
  */
 export const DEFAULT_FAILED_RETRY_BACKOFF_MS = 300_000
+
+/**
+ * Default idle timeout before a child broker is reaped — 4 hours.
+ *
+ * Measured motivation: 16 child brokers on one machine, 12 of them serving
+ * directories with no live Copilot session, holding ~1.47 GB of private bytes
+ * and ~500s of CPU each over 30 hours. Nothing ever stopped them, because
+ * nothing could: once spawned, a child ran forever.
+ *
+ * 4h is deliberately far longer than any plausible pause inside a working
+ * session (lunch, a long build, a meeting) so reaping cannot interrupt someone
+ * mid-task, and far shorter than the overnight-to-multi-day window in which
+ * the abandoned children actually accumulate. The cost of being wrong is
+ * bounded in any case: the first request to the project wakes the broker
+ * again (`wakeIdleProject`), it does not refuse the session.
+ */
+export const DEFAULT_IDLE_TIMEOUT_MS = 14_400_000
+
+/**
+ * How long to wait before retrying a reap that was REFUSED.
+ *
+ * A refusal means the stop could not be verified (see `stopChildVerified`),
+ * which on this machine is caused by load — a SIGTERM that does not take, a
+ * `taskkill` that times out. Retrying every 5s would spend seconds of serial
+ * tick time per attempt and make the load that caused the refusal worse. The
+ * child is healthy and merely unwanted, so there is no urgency: try again in
+ * ten minutes.
+ */
+export const DEFAULT_REAP_COOLDOWN_MS = 600_000
 
 /**
  * When a suspended child last had its state written — which, for a `failed`
@@ -77,6 +128,73 @@ export interface PlanTickInput {
   readonly policy: TickPolicy
   readonly restartHistoryByProject: ReadonlyMap<string, ReadonlyArray<number>>
   readonly lastRestartByProject: ReadonlyMap<string, number>
+  /**
+   * Per project, how long the child had gone without serving a non-monitoring
+   * request as of the supervisor's last SUCCESSFUL probe.
+   *
+   * A project absent from this map is a project whose idleness is UNKNOWN, and
+   * unknown never reaps. That is the whole fail-safe: the supervisor can only
+   * stop a child that affirmatively told it "nothing has asked me for anything
+   * in N ms". A probe that failed, a child too old to report the field, a
+   * project that has not been probed yet — all simply keep running.
+   */
+  readonly idleMsByProject?: ReadonlyMap<string, number>
+  /**
+   * When a reap was last attempted per project. Paces retries after a refused
+   * stop — see {@link DEFAULT_REAP_COOLDOWN_MS}.
+   */
+  readonly lastReapAttemptByProject?: ReadonlyMap<string, number>
+}
+
+/**
+ * How long this project has gone without demand, taking the EARLIEST evidence
+ * of use from either source. Null when nothing is known.
+ *
+ * Two independent signals, because neither sees what the other does:
+ *
+ *  - `idleMsByProject` — the child's own last non-monitoring request. Precise,
+ *    but blind to a session that has resolved and not yet spoken.
+ *  - `last_resolved_at` — when `/api/meta/resolve` last handed this project's
+ *    URL to a session. That resolve happens on the GLOBAL broker and never
+ *    touches the child, so without it a session resolving at 3h59m would have
+ *    its broker reaped out from under it seconds later, and its first write
+ *    would be refused.
+ *
+ * Taking the minimum means ANY evidence of recent use protects the child.
+ */
+function effectiveIdleMs(proj: ProjectRow, input: PlanTickInput): number | null {
+  const fromChild = input.idleMsByProject?.get(proj.projectId)
+  // The child's own reading is REQUIRED. `last_resolved_at` may only SHORTEN
+  // the idle age; it can never establish one. The absence of recent resolves
+  // is not evidence that nobody is using the broker — a session that resolved
+  // once and has been working hard ever since resolves no more.
+  if (fromChild === undefined) return null
+  const resolvedAt = proj.lastResolvedAt === null ? NaN : Date.parse(proj.lastResolvedAt)
+  if (Number.isNaN(resolvedAt)) return fromChild
+  return Math.min(fromChild, Math.max(0, input.nowMs - resolvedAt))
+}
+
+/** @returns the idle reap decision for a healthy, verified-running child. */
+function planIdleReap(proj: ProjectRow, input: PlanTickInput): TickAction | null {
+  // Only a child that is `running` AND clean. A child with health failures
+  // belongs to the restart policy, which has already had its say above; racing
+  // the reaper against a restart would make both decisions harder to reason
+  // about for no benefit.
+  if (proj.status !== 'running' || proj.healthFailures > 0) return null
+  const timeoutMs = input.policy.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS
+  if (timeoutMs <= 0) return null
+  const idleMs = effectiveIdleMs(proj, input)
+  if (idleMs === null || idleMs < timeoutMs) return null
+  // A refused reap is paced, not abandoned. See DEFAULT_REAP_COOLDOWN_MS.
+  const lastAttempt = input.lastReapAttemptByProject?.get(proj.projectId)
+  const cooldownMs = input.policy.reapCooldownMs ?? DEFAULT_REAP_COOLDOWN_MS
+  if (lastAttempt !== undefined && input.nowMs - lastAttempt < cooldownMs) return null
+  return {
+    kind: 'stop-idle',
+    projectId: proj.projectId,
+    idleMs,
+    reason: `no non-monitoring request in ${Math.round(idleMs / 60_000)}m (idle timeout ${Math.round(timeoutMs / 60_000)}m)`,
+  }
 }
 
 function planForProject(proj: ProjectRow, input: PlanTickInput): TickAction | null {
@@ -112,6 +230,11 @@ function planForProject(proj: ProjectRow, input: PlanTickInput): TickAction | nu
           return { kind: 'restart', projectId: proj.projectId, reason: decision.reason }
         }
       }
+      // Nothing is using this child — park it. Checked before the probe so a
+      // reapable child is stopped this tick rather than probed first and
+      // stopped on the next one.
+      const idleReap = planIdleReap(proj, input)
+      if (idleReap) return idleReap
       // Otherwise: probe health if we know where to probe.
       if (proj.boundPort !== null && proj.instanceId !== null) {
         return {
@@ -178,7 +301,13 @@ function planForProject(proj: ProjectRow, input: PlanTickInput): TickAction | nu
     }
 
     case 'stopped':
-      // Terminal until operator re-registers — skip.
+      // Terminal — skip. True for BOTH kinds of stop, and deliberately so:
+      //  - `stopped_reason = 'operator'` (or NULL) stays down until
+      //    `meta-broker reset`.
+      //  - `stopped_reason = 'idle'` stays down until DEMAND wakes it. The
+      //    wake is `/api/meta/resolve` flipping the row to `registered`
+      //    (`wakeIdleProject`), never a timer here — a reaped child that
+      //    respawned on its own would make the whole feature pointless.
       return null
   }
 }

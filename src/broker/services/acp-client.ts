@@ -1,5 +1,5 @@
-import { spawn as nodeSpawn } from 'node:child_process'
-import type { ChildProcess, SpawnOptionsWithoutStdio } from 'node:child_process'
+import { ChildProcess, spawn as nodeSpawn, spawnSync } from 'node:child_process'
+import type { SpawnOptionsWithoutStdio } from 'node:child_process'
 import { createInterface } from 'node:readline'
 import { logger } from '../../shared/logger.js'
 import type { AcpSessionStateType } from '../types.js'
@@ -256,6 +256,11 @@ export interface AcpClientOptions {
   readonly initTimeoutMs?: number
   readonly promptTimeoutMs?: number
   readonly spawnFn?: typeof nodeSpawn
+  /**
+   * Reap the spawned ACP process tree on close() before SIGTERM. Defaults to
+   * {@link killWindowsProcessTree} for real OS ChildProcess instances.
+   */
+  readonly killProcessTree?: (pid: number) => void
   /** Fires once when the underlying ACP process exits for any reason (including external kill). */
   readonly onProcessExit?: (info: { code: number | null; signal: NodeJS.Signals | null }) => void
   /**
@@ -365,6 +370,24 @@ interface PendingRequest {
 }
 
 // ── Implementation ───────────────────────────────────────────────────────
+
+/**
+ * Reap a spawned ACP process and all of its descendants on Windows (`taskkill /T /F`).
+ * Node's `ChildProcess.kill('SIGTERM')` on Windows terminates only the root PID,
+ * leaving wrapper-spawned `copilot.exe` / `git.exe` children orphaned.
+ */
+export function killWindowsProcessTree(
+  pid: number,
+  platform: NodeJS.Platform = globalThis.process.platform,
+  runSync: typeof spawnSync = spawnSync,
+): void {
+  if (platform !== 'win32' || !Number.isInteger(pid) || pid <= 0) return
+  runSync('taskkill', ['/PID', String(pid), '/T', '/F'], {
+    stdio: 'ignore',
+    timeout: 5_000,
+    windowsHide: true,
+  })
+}
 
 export function createAcpClient(options?: AcpClientOptions): AcpClient {
   const log = logger.child({ module: 'acp-client' })
@@ -653,6 +676,7 @@ export function createAcpClient(options?: AcpClientOptions): AcpClient {
       stdio: ['pipe', 'pipe', 'pipe'],
       env: { ...globalThis.process.env, ...(options?.env ?? {}) },
       cwd: options?.cwd,
+      windowsHide: true,
     }
 
     // Phase 1.5 step 5 — capture the mark *before* the spawnFn invocation
@@ -865,6 +889,18 @@ export function createAcpClient(options?: AcpClientOptions): AcpClient {
       rejectAllPending(new AcpError('ACP client closed'))
 
       if (process && !process.killed) {
+        if (
+          !processExited &&
+          typeof process.pid === 'number' &&
+          process.pid > 0 &&
+          (options?.killProcessTree !== undefined || process instanceof ChildProcess)
+        ) {
+          try {
+            ;(options?.killProcessTree ?? killWindowsProcessTree)(process.pid)
+          } catch (err) {
+            log.warn({ err, pid: process.pid }, 'close(): killProcessTree failed')
+          }
+        }
         process.kill('SIGTERM')
       }
 

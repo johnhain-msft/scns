@@ -4,6 +4,7 @@ import type { ChildProcess } from 'node:child_process'
 import {
   createAcpClient,
   createDenyAllPermissionPolicy,
+  killWindowsProcessTree,
   type AcpClient,
   type AcpClientOptions,
   AcpError,
@@ -65,9 +66,7 @@ function createMockProcess(): {
   }
 }
 
-function createClientWithMock(
-  opts?: Partial<AcpClientOptions>,
-): {
+function createClientWithMock(opts?: Partial<AcpClientOptions>): {
   client: AcpClient
   mock: ReturnType<typeof createMockProcess>
   spawnFn: ReturnType<typeof vi.fn>
@@ -152,7 +151,9 @@ describe('AcpClient', () => {
       const { spawnFn } = createClientWithMock({ env })
 
       // initialize starts the process — we don't need to await it
-      void createAcpClient({ spawnFn, env, initTimeoutMs: 50 }).initialize().catch(() => {})
+      void createAcpClient({ spawnFn, env, initTimeoutMs: 50 })
+        .initialize()
+        .catch(() => {})
       await new Promise((r) => setTimeout(r, 10))
 
       expect(spawnFn).toHaveBeenCalled()
@@ -361,9 +362,7 @@ describe('AcpClient', () => {
       await sessP
 
       // Never send a response to the prompt — timeout should fire.
-      await expect(shortClient.sendPrompt('sess-short', 'Hello')).rejects.toThrow(
-        AcpTimeoutError,
-      )
+      await expect(shortClient.sendPrompt('sess-short', 'Hello')).rejects.toThrow(AcpTimeoutError)
     })
   })
 
@@ -802,7 +801,9 @@ describe('AcpClient', () => {
     it('omits --allow-all-tools by default (gated behavior preserved)', () => {
       const mock = createMockProcess()
       const spawnFn = vi.fn().mockReturnValue(mock.process)
-      createAcpClient({ spawnFn, initTimeoutMs: 500 }).initialize().catch(() => undefined)
+      createAcpClient({ spawnFn, initTimeoutMs: 500 })
+        .initialize()
+        .catch(() => undefined)
 
       const [cmd, args] = spawnFn.mock.calls[0]!
       expect(cmd).toBe('copilot')
@@ -961,10 +962,7 @@ describe('AcpClient', () => {
       await new Promise((r) => setTimeout(r, 10))
 
       expect(client.getAvailableCommands('sess-A')).toEqual([{ name: 'plan' }])
-      expect(client.getAvailableCommands('sess-B')).toEqual([
-        { name: 'mcp' },
-        { name: 'handoff' },
-      ])
+      expect(client.getAvailableCommands('sess-B')).toEqual([{ name: 'mcp' }, { name: 'handoff' }])
       expect(client.getAvailableCommands('unknown')).toBeNull()
     })
 
@@ -1322,9 +1320,7 @@ describe('AcpClient', () => {
       expect(midT.sessionNewResolvedAt).toBeNull()
 
       const sessionReq = JSON.parse(mock.stdinData[1]!)
-      mock.stdout.push(
-        jsonRpcResponse(sessionReq.id, { sessionId: 'acp-sess-1', models: {} }),
-      )
+      mock.stdout.push(jsonRpcResponse(sessionReq.id, { sessionId: 'acp-sess-1', models: {} }))
       await sessionP
 
       const finalT = client.timings
@@ -1354,9 +1350,7 @@ describe('AcpClient', () => {
       const sessionP = client.createSession('/tmp/cwd')
       await new Promise((r) => setTimeout(r, 5))
       const sessionReq = JSON.parse(mock.stdinData[1]!)
-      mock.stdout.push(
-        jsonRpcResponse(sessionReq.id, { sessionId: 'acp-sess-1', models: {} }),
-      )
+      mock.stdout.push(jsonRpcResponse(sessionReq.id, { sessionId: 'acp-sess-1', models: {} }))
       await sessionP
 
       const t = client.timings
@@ -1506,8 +1500,12 @@ describe('T057 — humanPermission: async human-in-the-loop with pending trackin
 
   function pushPermission(mock: ReturnType<typeof createMockProcess>, id: number): void {
     mock.stdout.push(
-      JSON.stringify({ jsonrpc: '2.0', id, method: 'session/request_permission', params: PERM_PARAMS }) +
-        '\n',
+      JSON.stringify({
+        jsonrpc: '2.0',
+        id,
+        method: 'session/request_permission',
+        params: PERM_PARAMS,
+      }) + '\n',
     )
   }
 
@@ -1564,5 +1562,66 @@ describe('T057 — humanPermission: async human-in-the-loop with pending trackin
     const reply = JSON.parse(mock.stdinData[mock.stdinData.length - 1]!)
     expect(reply.id).toBe(2004)
     expect(reply.result).toEqual({ outcome: { outcome: 'selected', optionId: 'allow-once' } })
+  })
+})
+
+describe('Windows process-tree reaping on close()', () => {
+  it('killWindowsProcessTree invokes taskkill /PID <pid> /T /F on win32 and skips non-win32 or invalid pids', () => {
+    const runSync = vi.fn()
+    killWindowsProcessTree(4242, 'win32', runSync as never)
+    expect(runSync).toHaveBeenCalledWith('taskkill', ['/PID', '4242', '/T', '/F'], {
+      stdio: 'ignore',
+      timeout: 5_000,
+      windowsHide: true,
+    })
+
+    runSync.mockClear()
+    killWindowsProcessTree(4242, 'darwin', runSync as never)
+    killWindowsProcessTree(4242, 'linux', runSync as never)
+    killWindowsProcessTree(0, 'win32', runSync as never)
+    killWindowsProcessTree(-1, 'win32', runSync as never)
+    killWindowsProcessTree(Number.NaN, 'win32', runSync as never)
+    expect(runSync).not.toHaveBeenCalled()
+  })
+
+  it('close() reaps the process tree before SIGTERM when the child is still running', async () => {
+    const events: string[] = []
+    const mock = createMockProcess()
+    mock.process.kill = vi.fn(() => {
+      events.push('kill:SIGTERM')
+      ;(mock.process as { killed: boolean }).killed = true
+      return true
+    })
+    const killProcessTree = vi.fn((pid: number) => {
+      events.push(`tree:${pid}`)
+    })
+    const spawnFn = vi.fn().mockReturnValue(mock.process)
+    const client = createAcpClient({
+      spawnFn,
+      killProcessTree,
+      initTimeoutMs: 500,
+      closeGraceMs: 0,
+    })
+
+    const initP = client.initialize()
+    await new Promise((r) => setTimeout(r, 10))
+    expect(spawnFn.mock.calls[0]![2]).toMatchObject({ windowsHide: true })
+
+    await client.close()
+    await expect(initP).rejects.toThrow(AcpError)
+    expect(events).toEqual(['tree:12345', 'kill:SIGTERM'])
+  })
+
+  it('NEGATIVE control: close() skips killProcessTree when the child has already exited', async () => {
+    const killProcessTree = vi.fn()
+    const { client, mock } = createClientWithMock({ killProcessTree, closeGraceMs: 0 })
+
+    const initP = client.initialize()
+    await new Promise((r) => setTimeout(r, 10))
+    mock.emit('exit', 0, null)
+    await expect(initP).rejects.toThrow(AcpError)
+
+    await client.close()
+    expect(killProcessTree).not.toHaveBeenCalled()
   })
 })

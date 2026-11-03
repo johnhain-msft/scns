@@ -28,6 +28,14 @@ export interface ProgressiveHealthDeps {
   getEmbeddingBackfillState?: () => EmbeddingBackfillSnapshot
   getBrainStatus?: () => 'starting' | 'ready'
   getOtelStatus?: () => OtelHealthSnapshot
+  /**
+   * Idle reaping — ms since this broker last served a non-monitoring request
+   * (see `broker/request-activity.ts`). Surfaced so the meta-supervisor can
+   * decide, from the probe it already makes, whether anyone is still using
+   * this child. Omitted on brokers that do not track it; the supervisor treats
+   * an absent value as "idleness unknown" and never reaps on it.
+   */
+  getLastRequestAgeMs?: () => number
 }
 
 export type OverallStatus = 'ready' | 'degraded' | 'starting'
@@ -56,6 +64,24 @@ export interface ProgressiveHealthResponse {
   readonly instance_id?: string
   /** P7 — `BROKER_PROJECT_ID` echo (debugging convenience). */
   readonly project_id?: string
+  /**
+   * Idle reaping — seconds since this broker last served a non-monitoring
+   * request. Absent when the broker does not track request activity, which the
+   * meta-supervisor reads as "unknown" (and therefore never reaps).
+   */
+  readonly last_request_age_seconds?: number
+  /**
+   * Adoption — this process's OWN pid, self-reported.
+   *
+   * The meta-supervisor needs a pid to stop a child it did not spawn, and the
+   * registry's `child_pid` is explicitly advisory ("never trust it for
+   * identity" — see `meta-broker/registry.ts`): it was written by a previous
+   * supervisor incarnation and the OS may have recycled it since. A pid
+   * reported by the very process that just passed an identity-checked probe on
+   * this port cannot be stale, because that process is demonstrably alive and
+   * demonstrably the right one.
+   */
+  readonly pid?: number
 }
 
 const STARTING_WINDOW_MS = 500
@@ -72,19 +98,14 @@ function computeDbStatus(db: Database.Database): ComponentStatus {
   }
 }
 
-function computeEmbeddingStatus(
-  deps: ProgressiveHealthDeps,
-): ComponentStatus {
+function computeEmbeddingStatus(deps: ProgressiveHealthDeps): ComponentStatus {
   if (!deps.getEmbeddingBackfillState) {
     return { status: 'idle', progress: null }
   }
   const snap = deps.getEmbeddingBackfillState()
   return {
     status: snap.status,
-    progress:
-      snap.status === 'backfilling' || snap.status === 'ready'
-        ? snap.progress
-        : null,
+    progress: snap.status === 'backfilling' || snap.status === 'ready' ? snap.progress : null,
     errorMessage: snap.errorMessage ?? null,
   }
 }
@@ -123,7 +144,11 @@ export function computeOverallStatus(
   if (db.status !== 'ready') return 'degraded'
   if (uptimeMs < STARTING_WINDOW_MS) return 'starting'
   if (embeddings.status === 'ready' && brain.status === 'ready') return 'ready'
-  if (embeddings.status === 'backfilling' || brain.status === 'starting' || embeddings.status === 'failed') {
+  if (
+    embeddings.status === 'backfilling' ||
+    brain.status === 'starting' ||
+    embeddings.status === 'failed'
+  ) {
     return 'degraded'
   }
   if (embeddings.status === 'idle') return 'ready'
@@ -143,13 +168,18 @@ export function buildProgressiveHealth(
 
   const instanceId = process.env['SCNS_INSTANCE_ID']
   const projectId = process.env['BROKER_PROJECT_ID']
+  const lastRequestAgeMs = deps.getLastRequestAgeMs?.()
 
   return {
     status,
     uptime_seconds: Math.max(0, Math.floor(uptimeMs / 1000)),
     components: { embeddings, brain, db, otel },
+    pid: process.pid,
     ...(instanceId ? { instance_id: instanceId } : {}),
     ...(projectId ? { project_id: projectId } : {}),
+    ...(typeof lastRequestAgeMs === 'number' && Number.isFinite(lastRequestAgeMs)
+      ? { last_request_age_seconds: Math.max(0, Math.floor(lastRequestAgeMs / 1000)) }
+      : {}),
   }
 }
 

@@ -36,11 +36,16 @@ import {
   createActiveRequestCounter,
 } from './middleware/rate-limiter.js'
 import { createAuthMiddleware } from './middleware/auth.js'
+import { createRequestActivityTracker } from './request-activity.js'
 import { createSanitizeMiddleware } from './middleware/sanitize.js'
 import { shutdownMiddleware, type ShutdownManager } from './shutdown.js'
 import { registerTools } from './tools/register-tools.js'
 import { registerRoutes } from './routes/index.js'
-import { resolveProjectForPath } from '../meta-broker/registry.js'
+import {
+  resolveProjectForPath,
+  wakeIdleProject,
+  recordProjectResolved,
+} from '../meta-broker/registry.js'
 import { resolveScnsHome } from '../shared/scns-home.js'
 import { isAbsolutePath } from '../shared/paths.js'
 import { registerDashboardRoutes } from './routes/dashboard-routes.js'
@@ -101,6 +106,111 @@ function defaultFootprintTargets(): readonly FootprintTarget[] {
 interface ActiveTransport {
   readonly transport: StreamableHTTPServerTransport
   readonly server: McpServer
+}
+
+/**
+ * Short-lived WRITABLE registry connection for the two tiny writes the resolve
+ * path needs (the idle wake, and the demand stamp).
+ *
+ * `/api/meta/resolve` opens the registry `{ readonly: true }` and that must
+ * stay read-only — it is a hot path consulted by every session hook, and a
+ * resolve must never be able to corrupt the routing table it is reading. So
+ * writes get their own connection, opened and closed around one statement.
+ *
+ * `timeout` is explicit rather than better-sqlite3's 5s default: this is a
+ * SYNCHRONOUS open on an Express handler, so the default would block the whole
+ * global broker's event loop for five seconds whenever the registry is locked.
+ *
+ * 1s is kept deliberately after review pushback that lowering it raises the
+ * chance of `SQLITE_BUSY` on a registry the supervisor writes every 5s. Every
+ * writer here holds the lock for a single statement — microseconds — so a
+ * busy-retry budget of one full second is already four orders of magnitude
+ * more than contention requires; what raising it would actually buy is a
+ * longer worst-case stall of the global broker. The failure mode it leaves is
+ * now bounded and benign: a missed wake is retried by the next resolve, within
+ * the extension's budget.
+ *
+ * Never throws.
+ */
+const META_WRITE_TIMEOUT_MS = 1_000
+/** Throttle for the failure log only — never for the write attempt itself. */
+const WRITE_WARN_THROTTLE_MS = 10_000
+const lastWriteWarn = new Map<string, number>()
+
+function withWritableRegistry<T>(
+  metaRegistryDbPath: string,
+  what: string,
+  projectId: string,
+  fn: (db: InstanceType<typeof Database>) => T,
+  fallback: T,
+): T {
+  let writable: InstanceType<typeof Database> | null = null
+  try {
+    writable = new Database(metaRegistryDbPath, {
+      fileMustExist: true,
+      timeout: META_WRITE_TIMEOUT_MS,
+    })
+    return fn(writable)
+  } catch (err) {
+    const key = `${what}:${projectId}`
+    const last = lastWriteWarn.get(key) ?? 0
+    if (Date.now() - last >= WRITE_WARN_THROTTLE_MS) {
+      lastWriteWarn.set(key, Date.now())
+      logger.warn({ err, projectId, what }, 'meta-resolve: registry write failed')
+    }
+    return fallback
+  } finally {
+    try {
+      writable?.close()
+    } catch {
+      /* best effort */
+    }
+  }
+}
+
+/**
+ * Flip an idle-reaped project back to `registered` so the next supervisor tick
+ * respawns its child.
+ *
+ * Never throws: the caller answers `child-idle` either way. A failed wake is
+ * not a failed resolve — `child-idle` is retryable in the extension, so the
+ * next attempt simply tries the wake again.
+ *
+ * EVERY call attempts the write. An earlier revision added a 5s backoff that
+ * returned false WITHOUT attempting, to avoid re-opening a connection on each
+ * 500ms extension poll. That traded the wrong thing away: a wake that does not
+ * happen is the only thing standing between a session and `global:fallback`,
+ * while the cost it avoided — a sub-millisecond open of a local file, at most
+ * ~90 times across a whole 45s startup budget — was never real. What genuinely
+ * needed throttling was the WARNING log, which is throttled below instead.
+ */
+function requestIdleWake(metaRegistryDbPath: string, projectId: string): boolean {
+  return withWritableRegistry(
+    metaRegistryDbPath,
+    'idle-wake',
+    projectId,
+    (db) => wakeIdleProject(db, projectId),
+    false,
+  )
+}
+
+/**
+ * Stamp "a session was just handed this project's URL" onto the registry.
+ *
+ * The child cannot observe this itself — resolve runs here, on the global
+ * broker, and never contacts the child. Without the stamp, a session resolving
+ * just before the idle threshold has its broker reaped out from under it and
+ * its first write refused. Throttled inside `recordProjectResolved`, so the
+ * common case does no write at all.
+ */
+function recordResolvedDemand(metaRegistryDbPath: string, projectId: string): void {
+  withWritableRegistry(
+    metaRegistryDbPath,
+    'resolve-demand-stamp',
+    projectId,
+    (db) => recordProjectResolved(db, projectId),
+    false,
+  )
 }
 
 export interface BrokerServer {
@@ -317,6 +427,15 @@ export function createBrokerServer(
   const activeRequestCounter = createActiveRequestCounter()
   app.use(activeRequestCounter.middleware)
 
+  // 1b. Demand signal — last non-monitoring request (powers idle reaping).
+  //     Mounted before auth on purpose: this is the child's own answer to "is
+  //     anyone still talking to me", and a request that reaches the process at
+  //     all is evidence of a caller, whether or not it then 401s. Monitoring
+  //     traffic (the supervisor probe, the watchdog, drain polling) is excluded
+  //     inside the tracker — see `request-activity.ts`.
+  const requestActivity = createRequestActivityTracker()
+  app.use(requestActivity.middleware)
+
   // 2. CORS
   app.use((_req: Request, res: Response, next: express.NextFunction) => {
     res.setHeader('Access-Control-Allow-Origin', '*')
@@ -481,6 +600,7 @@ export function createBrokerServer(
     getEmbeddingBackfillState: options?.progressiveHealth?.getEmbeddingBackfillState,
     getBrainStatus: options?.progressiveHealth?.getBrainStatus,
     getOtelStatus: options?.progressiveHealth?.getOtelStatus,
+    getLastRequestAgeMs: () => requestActivity.idleMs(),
   }
   app.use('/api/health', createProgressiveHealthRouter(progressiveHealthDeps))
 
@@ -655,6 +775,25 @@ export function createBrokerServer(
         return
       }
       if (project.status !== 'running' || project.boundPort === null) {
+        // An idle-reaped child is NOT a refusal — it is a cold start. Waking it
+        // here is what keeps the reaper safe: the alternative reason
+        // (`child-stopped`) is not in the extension's retryable set, so the
+        // session would latch `global:fallback` and silently refuse every
+        // memory write for the rest of its life. An OPERATOR stop
+        // (`stopped_reason` 'operator' or NULL) deliberately falls through to
+        // the terminal `child-stopped` below — `wakeIdleProject` guards on the
+        // reason in SQL, so no session can resurrect a stop a human meant.
+        if (project.status === 'stopped' && project.stoppedReason === 'idle') {
+          const woken = requestIdleWake(metaRegistryDbPath, project.projectId)
+          res.status(200).json({
+            resolved: false,
+            reason: 'child-idle',
+            projectId: project.projectId,
+            status: project.status,
+            waking: woken,
+          })
+          return
+        }
         res.status(200).json({
           resolved: false,
           reason: `child-${project.status}`,
@@ -663,6 +802,10 @@ export function createBrokerServer(
         })
         return
       }
+      // Demand evidence the child cannot record for itself — this handler runs
+      // on the GLOBAL broker and never contacts the child. Stamped before the
+      // response so the supervisor's very next tick already sees it.
+      recordResolvedDemand(metaRegistryDbPath, project.projectId)
       res.status(200).json({
         resolved: true,
         projectId: project.projectId,
