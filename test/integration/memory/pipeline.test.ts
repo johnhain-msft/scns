@@ -92,6 +92,33 @@ describe('Memory pipeline integration', () => {
     expect(results[0]!.content).toContain('Express 5')
   })
 
+  it('re-indexes an update that lands in the same mtime granule (#52)', () => {
+    // The race from #52: a second write whose mtime equals the one already
+    // indexed (same-length content, same filesystem timestamp granule), so
+    // the mtime shortlist alone would never see the update. Simulate the
+    // granule collision by pinning BOTH writes to one shared timestamp. The
+    // timestamp sits minutes in the future so the first write stays inside
+    // the indexer's racy window even if a loaded CI runner stalls this test
+    // between the write and the index pass — with a PAST pinned mtime, a
+    // >2s stall makes the first pass persist an exact (unsmudged) mtime and
+    // the test would then exercise nothing. A real same-granule second write
+    // can never carry an mtime older than the pass that indexed its
+    // predecessor, so the future pin loses no realism.
+    const sharedMtime = new Date(Date.now() + 5 * 60_000)
+    const filePath = join(rootDir, 'MEMORY.md')
+    vault.write('MEMORY.md', 'The project uses Express 4 for the HTTP server.')
+    utimesSync(filePath, sharedMtime, sharedMtime)
+    indexVaultSync(db, vault)
+
+    vault.write('MEMORY.md', 'The project uses Express 5 for the HTTP server.')
+    utimesSync(filePath, sharedMtime, sharedMtime)
+    indexVaultSync(db, vault)
+
+    const results = keywordOnlySearch(db, 'Express')
+    expect(results.length).toBeGreaterThan(0)
+    expect(results[0]!.content).toContain('Express 5')
+  })
+
   it('deleted files are removed from search results', () => {
     vault.write('TEMP.md', 'This is temporary experimental content about Kubernetes.')
     indexVaultSync(db, vault)
