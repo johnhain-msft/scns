@@ -751,10 +751,18 @@ environment variables inside them.
 node dist\cli.js doctor
 ```
 
-Fifteen checks run in failure-localization order: `node-version`, `dist-build`,
+Sixteen checks run in failure-localization order: `node-version`, `dist-build`,
 `native-modules`, `embedding-cache`, `scns-home-writable`, `broker-reachable`,
 `broker-auth`, `meta-registry`, `meta-resolve-cwd`, `extension-installed`, `strict-mode`,
-`unattended-actions`, `supervision-root`, `meta-broker-supervision`, `self-heal-arming`.
+`unattended-actions`, `unattended-target-repo`, `supervision-root`,
+`meta-broker-supervision`, `self-heal-arming`.
+
+`unattended-target-repo` guards *where* the unattended writers would act: when any
+GitHub-writing unattended feature is enabled (or `SCNS_SELF_ISSUE_REPO` is set), the
+target repository must be one the authenticated `gh` account owns. A missing,
+foreign, or unverifiable target is a `[FAIL]` — a misdirected writer would push
+branches or file issues on somebody else's repository, most likely the public
+upstream this install was cloned from. With everything off it stays `[info]`.
 
 The last three are *durability* checks, and they ask a different question from the rest.
 Everything above them asks "is it up now?"; they ask "will anything bring it back?" —

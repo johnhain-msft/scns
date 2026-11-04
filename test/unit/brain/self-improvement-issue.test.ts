@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import {
   fileSelfImprovementIssues,
+  resolveFileGapsTargetRepo,
   selfImproveMarker,
   SCNS_SELF_IMPROVEMENT_GAPS,
   SELF_IMPROVE_LABEL,
@@ -78,6 +79,39 @@ describe('fileSelfImprovementIssues', () => {
     const d = deps({ existing: [] })
     await fileSelfImprovementIssues(GAPS, d)
     expect(d._spies.listOpenIssues).toHaveBeenCalledWith(SELF_IMPROVE_LABEL)
+  })
+})
+
+describe('resolveFileGapsTargetRepo (#58)', () => {
+  it('an explicit --repo wins over the env', () => {
+    expect(resolveFileGapsTargetRepo('me/mine', { SCNS_SELF_ISSUE_REPO: 'other/repo' })).toEqual({
+      ok: true,
+      repo: 'me/mine',
+    })
+  })
+
+  it('falls back to SCNS_SELF_ISSUE_REPO', () => {
+    expect(resolveFileGapsTargetRepo(undefined, { SCNS_SELF_ISSUE_REPO: 'me/mine' })).toEqual({
+      ok: true,
+      repo: 'me/mine',
+    })
+  })
+
+  it('refuses with a reason when neither is set — there is no hardcoded default target', () => {
+    const r = resolveFileGapsTargetRepo(undefined, {})
+    expect(r.ok).toBe(false)
+    if (!r.ok) {
+      expect(r.reason).toContain('--repo')
+      expect(r.reason).toContain('SCNS_SELF_ISSUE_REPO')
+    }
+  })
+
+  it('treats blank values as unset', () => {
+    expect(resolveFileGapsTargetRepo('   ', { SCNS_SELF_ISSUE_REPO: '  ' }).ok).toBe(false)
+  })
+
+  it('trims the winning value', () => {
+    expect(resolveFileGapsTargetRepo('  me/mine  ', {})).toEqual({ ok: true, repo: 'me/mine' })
   })
 })
 

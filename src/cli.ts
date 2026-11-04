@@ -2757,10 +2757,22 @@ program
       const selfIssueLog = logger.child({ module: 'self-issue' })
       // Track-2: a meta-CHILD broker (SCNS_INSTANCE_ID set) must ingest ITS OWN
       // repo's issues, never fall back to the SCNS singleton's default.
-      const repo = resolveSelfIssueRepo({
+      // #58: the singleton has NO default target — an unconfigured singleton
+      // refuses to ingest rather than acting on a repo nobody chose (the old
+      // hardcoded default pointed at the public upstream repo, which is wrong
+      // for every install except the maintainer's own).
+      const repoResolution = resolveSelfIssueRepo({
         explicitRepo: process.env['SCNS_SELF_ISSUE_REPO'],
         instanceId: process.env['SCNS_INSTANCE_ID'],
       })
+      if (repoResolution.kind === 'unconfigured') {
+        selfIssueLog.error(
+          'self-issue ingestion has no target repo and will refuse to run: set ' +
+            'SCNS_SELF_ISSUE_REPO=owner/name to the repository this install may ' +
+            'ingest issues from — a repo the authenticated gh account owns (#58)',
+        )
+      }
+      const repo = repoResolution.kind === 'explicit' ? repoResolution.repo : undefined
       const labelAllowlist = (process.env['SCNS_SELF_ISSUE_LABELS'] ?? '')
         .split(',')
         .map((s) => s.trim())
@@ -2801,6 +2813,14 @@ program
       const maxAttempts = envInt('SCNS_SELF_ISSUE_MAX_ATTEMPTS', 3)
 
       broker.registerTaskHandler('self-issue-ingest', async () => {
+        // #58: refuse while unconfigured — the loud explanation already went
+        // out at registration above; per-tick this stays at info.
+        if (repoResolution.kind === 'unconfigured') {
+          selfIssueLog.info(
+            'self-issue ingestion skipped — no target repo configured (set SCNS_SELF_ISSUE_REPO=owner/name)',
+          )
+          return
+        }
         // Kill-switch: set shared_state broker:self_issue_disabled = '1' to halt.
         const disabled = sharedStateGet.get('broker:self_issue_disabled')
         if (disabled && disabled.value === '1') {
@@ -6477,30 +6497,40 @@ selfImprove
   .option('--apply', 'actually create issues (default: dry-run / plan only)', false)
   .option(
     '-R, --repo <repo>',
-    'target repo (owner/name)',
-    process.env['SCNS_SELF_ISSUE_REPO'] ?? 'johnhain-msft/scns',
+    'target repo (owner/name); falls back to SCNS_SELF_ISSUE_REPO; refused when neither is set (#58)',
   )
   .option('--max <n>', 'max issues to create per run', (v: string) => parseInt(v, 10))
-  .action(async (opts: { apply: boolean; repo: string; max?: number }) => {
+  .action(async (opts: { apply: boolean; repo?: string; max?: number }) => {
     const {
       fileSelfImprovementIssues,
       ghListOpenSelfImprovementIssues,
       ghCreateIssue,
+      resolveFileGapsTargetRepo,
       SCNS_SELF_IMPROVEMENT_GAPS,
       SELF_IMPROVE_LABEL,
     } = await import('./brain/self-improvement-issue.js')
 
+    // #58: no default target — filing issues on a repo nobody chose is how a
+    // user's install ends up acting on the public upstream repo.
+    const target = resolveFileGapsTargetRepo(opts.repo, process.env)
+    if (!target.ok) {
+      console.error(target.reason)
+      process.exitCode = 1
+      return
+    }
+    const repo = target.repo
+
     const result = await fileSelfImprovementIssues(SCNS_SELF_IMPROVEMENT_GAPS, {
-      listOpenIssues: async (label) => ghListOpenSelfImprovementIssues(label, opts.repo),
-      createIssue: async (i) => ghCreateIssue(i, opts.repo),
+      listOpenIssues: async (label) => ghListOpenSelfImprovementIssues(label, repo),
+      createIssue: async (i) => ghCreateIssue(i, repo),
       maxPerRun: opts.max,
       dryRun: !opts.apply,
     })
 
-    console.log(JSON.stringify({ repo: opts.repo, dryRun: !opts.apply, ...result }, null, 2))
+    console.log(JSON.stringify({ repo, dryRun: !opts.apply, ...result }, null, 2))
     if (!opts.apply) {
       console.log(
-        `\n(dry-run — re-run with --apply to create. Requires the '${SELF_IMPROVE_LABEL}' label to exist in ${opts.repo}.)`,
+        `\n(dry-run — re-run with --apply to create. Requires the '${SELF_IMPROVE_LABEL}' label to exist in ${repo}.)`,
       )
     }
   })

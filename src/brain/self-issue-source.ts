@@ -281,20 +281,36 @@ async function defaultGitOriginUrl(root: string): Promise<string> {
 }
 
 /**
+ * How the self-issue-ingest scheduler should pick its target repo.
+ * - `explicit`       — a non-blank `SCNS_SELF_ISSUE_REPO` names the repo.
+ * - `project-origin` — a meta-CHILD broker with no explicit repo lets `gh`
+ *                      derive the repo from ITS OWN project's origin remote.
+ * - `unconfigured`   — the singleton with no explicit repo. The caller must
+ *                      REFUSE to ingest: a target nobody chose is not a target.
+ */
+export type SelfIssueRepoResolution =
+  | { readonly kind: 'explicit'; readonly repo: string }
+  | { readonly kind: 'project-origin' }
+  | { readonly kind: 'unconfigured' }
+
+/**
  * Resolve which repo the self-issue-ingest scheduler targets.
  * - An explicit `SCNS_SELF_ISSUE_REPO` (non-blank) always wins.
  * - Otherwise a meta-CHILD broker (identified by `SCNS_INSTANCE_ID`, which is set
- *   ONLY by the meta-supervisor child spawn) resolves to `undefined` — it must
- *   NOT fall back to the singleton's repo, which would ingest SCNS's issues into
- *   another project's broker.
- * - The singleton (no instanceId) keeps the historical `johnhain-msft/scns` default.
+ *   ONLY by the meta-supervisor child spawn) derives the repo from its own
+ *   project's origin remote — it must NOT fall back to any SCNS default, which
+ *   would ingest SCNS's issues into another project's broker.
+ * - The singleton (no instanceId) with no explicit repo is `unconfigured` and
+ *   ingestion must refuse (#58). The historical hardcoded upstream default made
+ *   every install that enabled self-issue ingestion read from — and, through the
+ *   delivery loop, act on — the public upstream repo instead of its own.
  */
 export function resolveSelfIssueRepo(input: {
   readonly explicitRepo?: string | null
   readonly instanceId?: string | null
-}): string | undefined {
+}): SelfIssueRepoResolution {
   const explicit = (input.explicitRepo ?? '').trim()
-  if (explicit !== '') return explicit
+  if (explicit !== '') return { kind: 'explicit', repo: explicit }
   const isMetaChild = (input.instanceId ?? '').trim() !== ''
-  return isMetaChild ? undefined : 'johnhain-msft/scns'
+  return isMetaChild ? { kind: 'project-origin' } : { kind: 'unconfigured' }
 }

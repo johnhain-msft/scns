@@ -111,6 +111,36 @@ export async function fileSelfImprovementIssues(
   return { toCreate, created, skippedDuplicate, skippedCap }
 }
 
+// ── Target-repo resolution for the CLI (#58) ─────────────────────────
+
+export type FileGapsTarget =
+  | { readonly ok: true; readonly repo: string }
+  | { readonly ok: false; readonly reason: string }
+
+/**
+ * #58 — resolve the target repo for `self-improve file-gaps`. An explicit
+ * `--repo` wins, then `SCNS_SELF_ISSUE_REPO`; with neither the command must
+ * refuse. There is deliberately NO hardcoded fallback: the old default named
+ * the public upstream repo, so running this command with `--apply` and no
+ * flag filed issues on upstream instead of the operator's own repo.
+ */
+export function resolveFileGapsTargetRepo(
+  explicitRepo: string | undefined,
+  env: Readonly<Record<string, string | undefined>>,
+): FileGapsTarget {
+  const explicit = (explicitRepo ?? '').trim()
+  if (explicit !== '') return { ok: true, repo: explicit }
+  const fromEnv = (env['SCNS_SELF_ISSUE_REPO'] ?? '').trim()
+  if (fromEnv !== '') return { ok: true, repo: fromEnv }
+  return {
+    ok: false,
+    reason:
+      'self-improve file-gaps: no target repo configured. Pass --repo owner/name ' +
+      'or set SCNS_SELF_ISSUE_REPO. There is no default target: this command ' +
+      'files GitHub issues, and the repo it acts on must be an explicit choice.',
+  }
+}
+
 // ── gh CLI helpers (injectable exec for tests) ───────────────────────
 
 type Exec = typeof nodeExecFileSync
