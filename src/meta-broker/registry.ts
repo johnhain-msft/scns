@@ -27,6 +27,15 @@ import { isAbsolutePath, resolveDeepestRootIndex, type PlatformPath } from '../s
 
 export type ProjectStatus = 'registered' | 'starting' | 'running' | 'failing' | 'failed' | 'stopped'
 
+/**
+ * #63 — reserved project id for the singleton (global) broker's target-graph
+ * row. The row is configuration, not a child: `listProjects` (and therefore
+ * the supervisor's spawn loop and path routing) never returns it, and
+ * `registerProject` refuses the id. Read/write it via `getGlobalTargets` /
+ * `setGlobalTargets`.
+ */
+export const GLOBAL_BROKER_ID = 'global'
+
 export interface ProjectRow {
   readonly projectId: string
   readonly projectRoot: string
@@ -46,8 +55,25 @@ export interface ProjectRow {
    * Track-2 — per-project GitHub `owner/name` for the child's self-issue-ingest.
    * Threaded to the child as `SCNS_SELF_ISSUE_REPO` so it ingests ITS OWN repo's
    * issues (never the SCNS singleton's). null → child does not ingest issues.
+   *
+   * #63: superseded by `writeTargetRepo`; kept as the raw legacy column until a
+   * later migration retires it. Read `writeTargetRepo` instead — it carries the
+   * alias.
    */
   readonly selfIssueRepo: string | null
+  /**
+   * #63 — where this broker's updates come from (`owner/name`). Fetch-only,
+   * never a write target. Null for an ordinary registered project: a project
+   * is its own upstream.
+   */
+  readonly upstreamRepo: string | null
+  /**
+   * #63 — the ONE repo this broker's writers may act on: push branches, open
+   * PRs, file and ingest issues. EFFECTIVE value: `write_target_repo`, falling
+   * back to the legacy `self_issue_repo` so pre-#63 rows keep their target
+   * without a data migration.
+   */
+  readonly writeTargetRepo: string | null
   readonly createdAt: string
   readonly updatedAt: string
 }
@@ -58,7 +84,10 @@ export interface RegisterProjectInput {
   readonly desiredPort?: number | null
   readonly autonomyLevel?: number | null
   readonly autoApproveThreshold?: number | null
+  /** Legacy spelling of `writeTargetRepo` (#63) — still accepted. */
   readonly selfIssueRepo?: string | null
+  readonly upstreamRepo?: string | null
+  readonly writeTargetRepo?: string | null
 }
 
 export interface ProjectChildState {
@@ -83,6 +112,8 @@ interface RawRow {
   readonly autonomy_level: number | null
   readonly auto_approve_threshold: number | null
   readonly self_issue_repo: string | null
+  readonly upstream_repo: string | null
+  readonly write_target_repo: string | null
   readonly created_at: string
   readonly updated_at: string
 }
@@ -103,6 +134,8 @@ CREATE TABLE IF NOT EXISTS projects (
   autonomy_level  INTEGER,
   auto_approve_threshold REAL,
   self_issue_repo TEXT,
+  upstream_repo   TEXT,
+  write_target_repo TEXT,
   created_at      TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -125,6 +158,13 @@ export function applyMetaSchema(db: Database.Database): void {
   if (!cols.has('self_issue_repo')) {
     db.exec('ALTER TABLE projects ADD COLUMN self_issue_repo TEXT')
   }
+  // #63 — target graph: per-broker upstream + write-target repos.
+  if (!cols.has('upstream_repo')) {
+    db.exec('ALTER TABLE projects ADD COLUMN upstream_repo TEXT')
+  }
+  if (!cols.has('write_target_repo')) {
+    db.exec('ALTER TABLE projects ADD COLUMN write_target_repo TEXT')
+  }
 }
 
 function rowToProject(r: RawRow): ProjectRow {
@@ -142,6 +182,10 @@ function rowToProject(r: RawRow): ProjectRow {
     autonomyLevel: r.autonomy_level,
     autoApproveThreshold: r.auto_approve_threshold,
     selfIssueRepo: r.self_issue_repo,
+    upstreamRepo: r.upstream_repo,
+    // Read-side alias (#63): rows written before write_target_repo existed
+    // keep their target through the superseded column.
+    writeTargetRepo: r.write_target_repo ?? r.self_issue_repo,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   }
@@ -155,18 +199,25 @@ export function registerProject(
   if (!input.projectId || input.projectId.trim() === '') {
     throw new Error('registerProject: projectId must be a non-empty string')
   }
+  if (input.projectId === GLOBAL_BROKER_ID) {
+    throw new Error(
+      `registerProject: '${GLOBAL_BROKER_ID}' is the reserved singleton row — use setGlobalTargets`,
+    )
+  }
   if (!isAbsolutePath(input.projectRoot, pp)) {
     throw new Error('registerProject: projectRoot must be an absolute path')
   }
   db.prepare(
-    `INSERT INTO projects (project_id, project_root, desired_port, autonomy_level, auto_approve_threshold, self_issue_repo)
-     VALUES (@projectId, @projectRoot, @desiredPort, @autonomyLevel, @autoApproveThreshold, @selfIssueRepo)
+    `INSERT INTO projects (project_id, project_root, desired_port, autonomy_level, auto_approve_threshold, self_issue_repo, upstream_repo, write_target_repo)
+     VALUES (@projectId, @projectRoot, @desiredPort, @autonomyLevel, @autoApproveThreshold, @selfIssueRepo, @upstreamRepo, @writeTargetRepo)
      ON CONFLICT(project_id) DO UPDATE SET
        project_root = excluded.project_root,
        desired_port = COALESCE(excluded.desired_port, projects.desired_port),
        autonomy_level = COALESCE(excluded.autonomy_level, projects.autonomy_level),
        auto_approve_threshold = COALESCE(excluded.auto_approve_threshold, projects.auto_approve_threshold),
        self_issue_repo = COALESCE(excluded.self_issue_repo, projects.self_issue_repo),
+       upstream_repo = COALESCE(excluded.upstream_repo, projects.upstream_repo),
+       write_target_repo = COALESCE(excluded.write_target_repo, projects.write_target_repo),
        updated_at = datetime('now')`,
   ).run({
     projectId: input.projectId,
@@ -175,7 +226,57 @@ export function registerProject(
     autonomyLevel: input.autonomyLevel ?? null,
     autoApproveThreshold: input.autoApproveThreshold ?? null,
     selfIssueRepo: input.selfIssueRepo ?? null,
+    upstreamRepo: input.upstreamRepo ?? null,
+    writeTargetRepo: input.writeTargetRepo ?? null,
   })
+}
+
+// ── #63 — the reserved global (singleton) row ────────────────────────
+
+export interface GlobalTargets {
+  readonly upstreamRepo: string | null
+  readonly writeTargetRepo: string | null
+}
+
+/**
+ * Upsert the singleton broker's target graph into the reserved row.
+ * COALESCE semantics like `registerProject`: an omitted field never clears a
+ * stored value. `project_root` is a non-path sentinel — the row must never
+ * win a `resolveProjectForPath` lookup or read like a spawnable child.
+ */
+export function setGlobalTargets(db: Database.Database, targets: Partial<GlobalTargets>): void {
+  db.prepare(
+    `INSERT INTO projects (project_id, project_root, upstream_repo, write_target_repo)
+     VALUES (@projectId, '', @upstreamRepo, @writeTargetRepo)
+     ON CONFLICT(project_id) DO UPDATE SET
+       upstream_repo = COALESCE(excluded.upstream_repo, projects.upstream_repo),
+       write_target_repo = COALESCE(excluded.write_target_repo, projects.write_target_repo),
+       updated_at = datetime('now')`,
+  ).run({
+    projectId: GLOBAL_BROKER_ID,
+    upstreamRepo: targets.upstreamRepo ?? null,
+    writeTargetRepo: targets.writeTargetRepo ?? null,
+  })
+}
+
+/** The singleton's target graph, or null when the reserved row was never set. */
+export function getGlobalTargets(db: Database.Database): GlobalTargets | null {
+  const row = db
+    .prepare(
+      'SELECT upstream_repo, write_target_repo, self_issue_repo FROM projects WHERE project_id = ?',
+    )
+    .get(GLOBAL_BROKER_ID) as
+    | {
+        upstream_repo: string | null
+        write_target_repo: string | null
+        self_issue_repo: string | null
+      }
+    | undefined
+  if (!row) return null
+  return {
+    upstreamRepo: row.upstream_repo,
+    writeTargetRepo: row.write_target_repo ?? row.self_issue_repo,
+  }
 }
 
 export function getProject(db: Database.Database, projectId: string): ProjectRow | null {
@@ -187,8 +288,8 @@ export function getProject(db: Database.Database, projectId: string): ProjectRow
 
 export function getProjectByRoot(db: Database.Database, projectRoot: string): ProjectRow | null {
   const row = db
-    .prepare('SELECT * FROM projects WHERE project_root = ? LIMIT 1')
-    .get(projectRoot) as RawRow | undefined
+    .prepare('SELECT * FROM projects WHERE project_root = ? AND project_id != ? LIMIT 1')
+    .get(projectRoot, GLOBAL_BROKER_ID) as RawRow | undefined
   return row ? rowToProject(row) : null
 }
 
@@ -215,9 +316,12 @@ export function resolveProjectForPath(
 }
 
 export function listProjects(db: Database.Database): ReadonlyArray<ProjectRow> {
+  // The reserved global row (#63) is configuration, not a child: this list
+  // feeds the supervisor's spawn loop and resolveProjectForPath's routing,
+  // and both must never see it.
   const rows = db
-    .prepare('SELECT * FROM projects ORDER BY created_at ASC, project_id ASC')
-    .all() as RawRow[]
+    .prepare('SELECT * FROM projects WHERE project_id != ? ORDER BY created_at ASC, project_id ASC')
+    .all(GLOBAL_BROKER_ID) as RawRow[]
   return rows.map(rowToProject)
 }
 

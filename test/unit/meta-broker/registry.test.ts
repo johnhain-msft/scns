@@ -24,6 +24,9 @@ import {
   updateChildState,
   recordHealthFailure,
   resetHealthFailures,
+  setGlobalTargets,
+  getGlobalTargets,
+  GLOBAL_BROKER_ID,
   type ProjectChildState,
 } from '../../../src/meta-broker/registry.js'
 
@@ -299,6 +302,114 @@ describe('meta-broker registry — per-project self-issue repo (Track-2)', () =>
     registerProject(legacy, { projectId: 'p', projectRoot: '/a', selfIssueRepo: 'o/n' })
     expect(getProject(legacy, 'p')!.selfIssueRepo).toBe('o/n')
     legacy.close()
+  })
+})
+
+describe('meta-broker registry — target graph (#63)', () => {
+  it('round-trips upstreamRepo + writeTargetRepo and defaults both to null', () => {
+    registerProject(db, {
+      projectId: 'p-graph',
+      projectRoot: '/abs/p-graph',
+      upstreamRepo: 'upstream-org/tool',
+      writeTargetRepo: 'me/tool-home',
+    })
+    const p = getProject(db, 'p-graph')!
+    expect(p.upstreamRepo).toBe('upstream-org/tool')
+    expect(p.writeTargetRepo).toBe('me/tool-home')
+
+    registerProject(db, { projectId: 'p-bare', projectRoot: '/abs/p-bare' })
+    expect(getProject(db, 'p-bare')!.upstreamRepo).toBeNull()
+    expect(getProject(db, 'p-bare')!.writeTargetRepo).toBeNull()
+  })
+
+  it('preserves both columns via COALESCE when re-registered without them', () => {
+    registerProject(db, {
+      projectId: 'p-keep',
+      projectRoot: '/abs/p-keep',
+      upstreamRepo: 'upstream-org/tool',
+      writeTargetRepo: 'me/tool-home',
+    })
+    registerProject(db, { projectId: 'p-keep', projectRoot: '/abs/p-keep-moved' })
+    const p = getProject(db, 'p-keep')!
+    expect(p.projectRoot).toBe('/abs/p-keep-moved')
+    expect(p.upstreamRepo).toBe('upstream-org/tool')
+    expect(p.writeTargetRepo).toBe('me/tool-home')
+  })
+
+  it('writeTargetRepo reads through to the legacy self_issue_repo until one is set', () => {
+    // self_issue_repo is superseded but stays as the read-side alias: a row
+    // written before #63 keeps its write target without any data migration.
+    registerProject(db, { projectId: 'p-legacy', projectRoot: '/abs/p', selfIssueRepo: 'o/legacy' })
+    expect(getProject(db, 'p-legacy')!.writeTargetRepo).toBe('o/legacy')
+
+    registerProject(db, { projectId: 'p-legacy', projectRoot: '/abs/p', writeTargetRepo: 'o/new' })
+    const p = getProject(db, 'p-legacy')!
+    expect(p.writeTargetRepo).toBe('o/new')
+    // The raw legacy column is untouched — it is an alias, not a mirror.
+    expect(p.selfIssueRepo).toBe('o/legacy')
+  })
+
+  it('additively migrates upstream_repo + write_target_repo onto a pre-#63 registry', () => {
+    const legacy = new Database(':memory:')
+    legacy.exec(`CREATE TABLE projects (
+      project_id TEXT PRIMARY KEY, project_root TEXT NOT NULL,
+      desired_port INTEGER, bound_port INTEGER,
+      status TEXT NOT NULL DEFAULT 'registered',
+      instance_id TEXT, child_pid INTEGER, last_seen_at TEXT, last_error TEXT,
+      health_failures INTEGER NOT NULL DEFAULT 0,
+      autonomy_level INTEGER, auto_approve_threshold REAL, self_issue_repo TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )`)
+    legacy
+      .prepare('INSERT INTO projects (project_id, project_root, self_issue_repo) VALUES (?, ?, ?)')
+      .run('old-row', '/abs/old', 'o/legacy')
+    applyMetaSchema(legacy)
+    const cols = new Set(
+      (legacy.prepare('PRAGMA table_info(projects)').all() as Array<{ name: string }>).map(
+        (c) => c.name,
+      ),
+    )
+    expect(cols.has('upstream_repo')).toBe(true)
+    expect(cols.has('write_target_repo')).toBe(true)
+    const p = getProject(legacy, 'old-row')!
+    expect(p.upstreamRepo).toBeNull()
+    expect(p.writeTargetRepo).toBe('o/legacy') // read-side alias carries it forward
+    legacy.close()
+  })
+
+  it('rejects registering a project under the reserved global id', () => {
+    expect(() =>
+      registerProject(db, { projectId: GLOBAL_BROKER_ID, projectRoot: '/abs/x' }),
+    ).toThrow(/reserved/)
+  })
+
+  it('setGlobalTargets creates the reserved row and getGlobalTargets reads it back', () => {
+    expect(getGlobalTargets(db)).toBeNull()
+    setGlobalTargets(db, { upstreamRepo: 'upstream-org/tool', writeTargetRepo: 'me/tool-home' })
+    expect(getGlobalTargets(db)).toEqual({
+      upstreamRepo: 'upstream-org/tool',
+      writeTargetRepo: 'me/tool-home',
+    })
+  })
+
+  it('setGlobalTargets keeps the other column when updating only one (COALESCE)', () => {
+    setGlobalTargets(db, { upstreamRepo: 'upstream-org/tool', writeTargetRepo: 'me/tool-home' })
+    setGlobalTargets(db, { writeTargetRepo: 'me/other-home' })
+    expect(getGlobalTargets(db)).toEqual({
+      upstreamRepo: 'upstream-org/tool',
+      writeTargetRepo: 'me/other-home',
+    })
+  })
+
+  it('hides the reserved global row from listings, path routing, and lookups by root', () => {
+    // listProjects feeds the supervisor's spawn loop and resolveProjectForPath
+    // feeds session routing — the global row is configuration, not a child.
+    setGlobalTargets(db, { upstreamRepo: 'upstream-org/tool', writeTargetRepo: 'me/tool-home' })
+    registerProject(db, { projectId: 'p1', projectRoot: '/a' })
+    expect(listProjects(db).map((p) => p.projectId)).toEqual(['p1'])
+    expect(resolveProjectForPath(db, '/a/sub')?.projectId).toBe('p1')
+    expect(resolveProjectForPath(db, '/elsewhere')).toBeNull()
   })
 })
 

@@ -35,6 +35,7 @@ function healthyDeps(overrides: Partial<DoctorDeps> = {}): DoctorDeps {
     loadNativeModules: () => ({ ok: true, detail: 'better-sqlite3 + sqlite-vec + fastembed' }),
     countRegisteredProjects: () => 1,
     readLivePid: () => 7788,
+    readRegistryTargets: () => null,
     httpGet: async (url: string) => {
       if (url.endsWith('/health')) return { status: 200, body: { status: 'ok' } }
       if (url.includes('/api/meta/resolve')) {
@@ -429,6 +430,113 @@ describe('runDoctor — unattended target repo (#58)', () => {
       probeRepoOwnership: async () => 'owned',
     })
     expect(seen).toEqual(['/srv/work-repo'])
+  })
+})
+
+// #63 — the target graph in the meta registry extends the check with two
+// graph rules. FAIL on write target = upstream (ownership alone would bless
+// the maintainer's daemons writing to the public upstream they own); WARN
+// when the clone's origin drifts from the declared write target.
+describe('runDoctor — registry target graph (#63)', () => {
+  const globalRow = (upstream: string | null, writeTarget: string | null) => ({
+    projectId: 'global',
+    projectRoot: '',
+    upstreamRepo: upstream,
+    writeTargetRepo: writeTarget,
+  })
+
+  it('verifies a registry-declared singleton target even when env is unset', async () => {
+    const report = await run({
+      readRegistryTargets: () => [globalRow('owner/public', 'me/home')],
+      getOriginRepoSlug: async () => 'me/home',
+      probeRepoOwnership: async () => 'owned',
+    })
+    const c = check(report, 'unattended-target-repo')
+    expect(c.status).toBe('pass')
+    expect(c.detail).toContain('me/home')
+  })
+
+  it('FAILS a registry-declared target the authenticated account does not own', async () => {
+    const report = await run({
+      readRegistryTargets: () => [globalRow('owner/public', 'someone-else/home')],
+      getOriginRepoSlug: async () => 'someone-else/home',
+      probeRepoOwnership: async () => 'not-owned',
+    })
+    const c = check(report, 'unattended-target-repo')
+    expect(c.status).toBe('fail')
+    expect(c.detail).toContain('someone-else/home')
+  })
+
+  it('FAILS when the declared write target equals the declared upstream, even if owned', async () => {
+    // The maintainer owns the public repo, so the ownership rule alone would
+    // bless daemons writing to upstream. Identity with upstream is a
+    // misdirection regardless of who owns it.
+    const report = await run({
+      readRegistryTargets: () => [globalRow('owner/public', 'owner/public')],
+      getOriginRepoSlug: async () => 'owner/public',
+      probeRepoOwnership: async () => 'owned',
+    })
+    const c = check(report, 'unattended-target-repo')
+    expect(c.status).toBe('fail')
+    expect(c.detail).toMatch(/upstream/i)
+    expect(report.ok).toBe(false)
+  })
+
+  it('FAILS when the env override points at the declared upstream', async () => {
+    const report = await run({
+      env: { SCNS_SELF_ISSUE_REPO: 'owner/public' },
+      readRegistryTargets: () => [globalRow('owner/public', null)],
+      getOriginRepoSlug: async () => 'owner/public',
+      probeRepoOwnership: async () => 'owned',
+    })
+    const c = check(report, 'unattended-target-repo')
+    expect(c.status).toBe('fail')
+    expect(c.detail).toMatch(/upstream/i)
+  })
+
+  it('WARNS when the clone origin disagrees with the declared write target', async () => {
+    const report = await run({
+      env: { BROKER_PUBLISH_GATE_PASS: '1' },
+      readRegistryTargets: () => [globalRow('owner/public', 'me/new-home')],
+      getOriginRepoSlug: async () => 'me/old-home',
+      probeRepoOwnership: async () => 'owned',
+    })
+    const c = check(report, 'unattended-target-repo')
+    expect(c.status).toBe('warn')
+    expect(c.detail).toMatch(/drift/i)
+    expect(c.detail).toContain('me/old-home')
+    expect(c.detail).toContain('me/new-home')
+    // Drift is a warning, not a failure — the write still lands somewhere owned.
+    expect(report.ok).toBe(true)
+  })
+
+  it('lets a registered child row govern a writer root inside that project', async () => {
+    const report = await run({
+      env: { BROKER_PUBLISH_GATE_PASS: '1', BROKER_PROJECT_ROOT: '/srv/child-repo' },
+      readRegistryTargets: () => [
+        globalRow('owner/public', 'me/home'),
+        {
+          projectId: 'child-a',
+          projectRoot: '/srv/child-repo',
+          upstreamRepo: null,
+          writeTargetRepo: 'me/child-repo',
+        },
+      ],
+      getOriginRepoSlug: async () => 'me/child-repo',
+      probeRepoOwnership: async () => 'owned',
+    })
+    const c = check(report, 'unattended-target-repo')
+    // Matching the child's declared target: no drift against the GLOBAL row.
+    expect(c.status).toBe('pass')
+  })
+
+  it('still has nothing to verify when the graph declares no write target and nothing is enabled', async () => {
+    const report = await run({
+      readRegistryTargets: () => [globalRow('owner/public', null)],
+    })
+    const c = check(report, 'unattended-target-repo')
+    expect(c.status).toBe('info')
+    expect(c.detail).toMatch(/nothing to verify/i)
   })
 })
 
