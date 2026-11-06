@@ -22,7 +22,9 @@ import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 
 import { resolveScnsHome } from '../shared/scns-home.js'
+import { resolveDeepestRootIndex } from '../shared/paths.js'
 import { deriveSelfIssueRepoFromGit } from '../brain/self-issue-source.js'
+import { GLOBAL_BROKER_ID } from '../meta-broker/registry.js'
 import {
   isProcessAlive,
   readLiveBrokerPid,
@@ -35,7 +37,12 @@ import {
   describeSupervision,
 } from '../broker/services/supervision.js'
 import { getServicePaths } from './service-generators.js'
-import { countRegisteredProjects, metaBrokerPidfilePath } from './meta-supervision.js'
+import {
+  countRegisteredProjects,
+  metaBrokerPidfilePath,
+  readRegistryTargets,
+  type RegistryTargetRow,
+} from './meta-supervision.js'
 import {
   UNATTENDED_EFFECTS,
   UNATTENDED_FEATURES,
@@ -122,6 +129,8 @@ export interface DoctorDeps {
   readonly getOriginRepoSlug?: (dir: string) => Promise<string | null>
   /** #58 — whether the authenticated gh account owns (is admin on) `slug`. */
   readonly probeRepoOwnership?: (slug: string) => Promise<RepoOwnership>
+  /** #63 — the registry's declared target graph; null when unreadable. */
+  readonly readRegistryTargets?: (metaDbPath: string) => ReadonlyArray<RegistryTargetRow> | null
 }
 
 function defaultListDir(path: string): ReadonlyArray<string> {
@@ -225,6 +234,7 @@ export function defaultDoctorDeps(): DoctorDeps {
     readLivePid: (p: string) => readLiveBrokerPid(p),
     getOriginRepoSlug: (dir: string) => deriveSelfIssueRepoFromGit(dir),
     probeRepoOwnership: defaultProbeRepoOwnership,
+    readRegistryTargets,
   }
 }
 
@@ -536,21 +546,51 @@ export async function runDoctor(deps: DoctorDeps): Promise<DoctorReport> {
         },
   )
 
-  // 13. Unattended target repos (#58) — the check above answers "is
-  // anything allowed to act?"; this one answers "and at WHAT repo?". An
-  // enabled writer with no resolvable target, or a target the authenticated
-  // account does not own, is a misdirected daemon: it would push branches
-  // or file issues on somebody else's repository — most likely the public
-  // upstream this install was cloned from. That is a FAIL, not a warning,
-  // and it fails CLOSED when ownership cannot be verified.
+  // 13. Unattended target repos (#58, graph rules from #63) — the check
+  // above answers "is anything allowed to act?"; this one answers "and at
+  // WHAT repo?". An enabled writer with no resolvable target, or a target
+  // the authenticated account does not own, is a misdirected daemon: it
+  // would push branches or file issues on somebody else's repository — most
+  // likely the public upstream this install was cloned from. That is a
+  // FAIL, not a warning, and it fails CLOSED when ownership cannot be
+  // verified. #63 adds the registry's declared target graph: the reserved
+  // `global` row now supplies the singleton's target when env does not
+  // (env > registry > refuse), a write target equal to the declared
+  // upstream FAILS even when owned (the maintainer owns the public
+  // upstream, so ownership alone would bless daemons writing to it), and
+  // an origin remote that disagrees with the declared write target WARNS.
   const githubWritingFeatures: readonly UnattendedFeature[] = [
     'gate-pass-publisher',
     'north-star-nudge',
     'drift-watchdog',
   ]
   const enabledGithubWriters = githubWritingFeatures.filter((f) => isUnattendedEnabled(f, deps.env))
-  const selfIssueTarget = (deps.env['SCNS_SELF_ISSUE_REPO'] ?? '').trim()
-  if (enabledGithubWriters.length === 0 && selfIssueTarget === '') {
+  const registryTargets = (deps.readRegistryTargets ?? readRegistryTargets)(registryPath)
+  const globalRow = registryTargets?.find((r) => r.projectId === GLOBAL_BROKER_ID)
+  const envSelfIssueTarget = (deps.env['SCNS_SELF_ISSUE_REPO'] ?? '').trim()
+  const selfIssueTarget =
+    envSelfIssueTarget !== '' ? envSelfIssueTarget : (globalRow?.writeTargetRepo ?? '')
+
+  // #63 graph rule: identity with the declared upstream is a misdirection
+  // regardless of who owns it. Declared config, so checked even while every
+  // writer is off.
+  const problems: string[] = []
+  for (const row of registryTargets ?? []) {
+    if (row.upstreamRepo !== null && row.upstreamRepo === row.writeTargetRepo) {
+      problems.push(
+        `the registry declares broker '${row.projectId}' writing to its own upstream ` +
+          `${row.upstreamRepo} — upstream is fetch-only, never a write target`,
+      )
+    }
+  }
+  if (envSelfIssueTarget !== '' && globalRow?.upstreamRepo === envSelfIssueTarget) {
+    problems.push(
+      `SCNS_SELF_ISSUE_REPO=${envSelfIssueTarget} is the declared upstream of the global ` +
+        'broker — upstream is fetch-only, never a write target',
+    )
+  }
+
+  if (enabledGithubWriters.length === 0 && selfIssueTarget === '' && problems.length === 0) {
     add({
       id: 'unattended-target-repo',
       status: 'info',
@@ -558,28 +598,40 @@ export async function runDoctor(deps: DoctorDeps): Promise<DoctorReport> {
         'no unattended GitHub writer is enabled and no self-issue target is set — nothing to verify',
     })
   } else {
-    const problems: string[] = []
     const targets = new Map<string, readonly string[]>()
     const noteTarget = (slug: string, source: string): void => {
       targets.set(slug, [...(targets.get(slug) ?? []), source])
     }
+    // The writers act on the origin remote of the broker's project root —
+    // same resolution the broker itself uses (BROKER_PROJECT_ROOT, else cwd).
+    const writerRoot = deps.env['BROKER_PROJECT_ROOT'] ?? deps.cwd
+    const originSlugOf = deps.getOriginRepoSlug ?? deriveSelfIssueRepoFromGit
+    let writerOriginSlug: string | null | undefined
     if (enabledGithubWriters.length > 0) {
-      // The writers act on the origin remote of the broker's project root —
-      // same resolution the broker itself uses (BROKER_PROJECT_ROOT, else cwd).
-      const writerRoot = deps.env['BROKER_PROJECT_ROOT'] ?? deps.cwd
       const writerNames = enabledGithubWriters.join(' + ')
-      const slug = await (deps.getOriginRepoSlug ?? deriveSelfIssueRepoFromGit)(writerRoot)
-      if (slug === null) {
+      writerOriginSlug = await originSlugOf(writerRoot)
+      if (writerOriginSlug === null) {
         problems.push(
           `${writerNames} act on the origin remote of ${writerRoot}, ` +
             'which has no GitHub origin — their target is unset',
         )
       } else {
-        noteTarget(slug, writerNames)
+        noteTarget(writerOriginSlug, writerNames)
+        if (globalRow?.upstreamRepo === writerOriginSlug) {
+          problems.push(
+            `${writerNames} act on ${writerOriginSlug}, the declared upstream of the ` +
+              'global broker — upstream is fetch-only, never a write target',
+          )
+        }
       }
     }
     if (selfIssueTarget !== '') {
-      noteTarget(selfIssueTarget, 'self-issue ingestion (SCNS_SELF_ISSUE_REPO)')
+      noteTarget(
+        selfIssueTarget,
+        envSelfIssueTarget !== ''
+          ? 'self-issue ingestion (SCNS_SELF_ISSUE_REPO)'
+          : 'self-issue ingestion (registry global row)',
+      )
     }
     const probeOwnership = deps.probeRepoOwnership ?? defaultProbeRepoOwnership
     const verified: string[] = []
@@ -598,23 +650,58 @@ export async function runDoctor(deps: DoctorDeps): Promise<DoctorReport> {
         )
       }
     }
+    // #63 graph rule: WARN when the git topology drifted from the declared
+    // graph. The row that governs this clone is the deepest registered
+    // project containing it, else the reserved global row.
+    const warnings: string[] = []
+    if (registryTargets && registryTargets.length > 0) {
+      const childRows = registryTargets.filter(
+        (r) => r.projectId !== GLOBAL_BROKER_ID && r.projectRoot !== '',
+      )
+      const governingIdx = resolveDeepestRootIndex(
+        childRows.map((r) => r.projectRoot),
+        writerRoot,
+      )
+      const governing = governingIdx === -1 ? globalRow : childRows[governingIdx]
+      if (governing?.writeTargetRepo != null) {
+        const originSlug =
+          writerOriginSlug !== undefined ? writerOriginSlug : await originSlugOf(writerRoot)
+        if (originSlug !== null && originSlug !== governing.writeTargetRepo) {
+          warnings.push(
+            `the origin remote of ${writerRoot} is ${originSlug} but the registry declares ` +
+              `write target ${governing.writeTargetRepo} for broker '${governing.projectId}' — ` +
+              'git topology drifted from the declared graph',
+          )
+        }
+      }
+    }
     add(
-      problems.length === 0
+      problems.length > 0
         ? {
-            id: 'unattended-target-repo',
-            status: 'pass',
-            detail: `every target is owned by the authenticated account: ${verified.join(', ')}`,
-          }
-        : {
             id: 'unattended-target-repo',
             status: 'fail',
             detail: problems.join('; '),
             hint:
               'every unattended writer must target a repository the authenticated account ' +
-              'owns (for SCNS self-improvement that means your own private fork, never the ' +
-              'public upstream) — set SCNS_SELF_ISSUE_REPO / fix the origin remote, or ' +
-              'disable the writer',
-          },
+              'owns AND that is not the upstream it updates from (for SCNS self-improvement ' +
+              'that means your own private home repository, never the public upstream — see ' +
+              'docs/plans/public-private-split.md) — set SCNS_SELF_ISSUE_REPO / the registry ' +
+              'target graph / fix the origin remote, or disable the writer',
+          }
+        : warnings.length > 0
+          ? {
+              id: 'unattended-target-repo',
+              status: 'warn',
+              detail: `every target is owned by the authenticated account: ${verified.join(', ')}; ${warnings.join('; ')}`,
+              hint:
+                're-point the origin remote at the declared write target (or update the ' +
+                'registry row) so the git topology and the declared graph agree',
+            }
+          : {
+              id: 'unattended-target-repo',
+              status: 'pass',
+              detail: `every target is owned by the authenticated account: ${verified.join(', ')}`,
+            },
     )
   }
 

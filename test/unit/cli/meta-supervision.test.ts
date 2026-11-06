@@ -26,6 +26,8 @@ import {
   buildMetaBrokerSpawn,
   createMetaBrokerRestart,
   countRegisteredProjects,
+  readRegistryTargets,
+  formatTargetGraph,
 } from '../../../src/cli/meta-supervision.js'
 import { writeBrokerPidfile } from '../../../src/broker/services/broker-pidfile.js'
 
@@ -94,6 +96,144 @@ describe('countRegisteredProjects', () => {
 
   it('returns null for a missing file', () => {
     expect(countRegisteredProjects(join(tmpdir(), 'scns-nope-does-not-exist.db'))).toBeNull()
+  })
+
+  it('does not count the reserved global row — it is configuration, not a child (#63)', async () => {
+    // A registry holding ONLY the singleton's target graph must not flip
+    // meta-supervision on: there is no child for a supervisor to manage.
+    const home = tempHome()
+    try {
+      const metaDb = join(home, 'meta-broker.db')
+      const { default: Database } = await import('better-sqlite3')
+      const { applyMetaSchema, setGlobalTargets } =
+        await import('../../../src/meta-broker/registry.js')
+      const db = new Database(metaDb)
+      applyMetaSchema(db)
+      setGlobalTargets(db, { upstreamRepo: 'upstream-org/tool', writeTargetRepo: 'me/home' })
+      db.close()
+      expect(countRegisteredProjects(metaDb)).toBe(0)
+    } finally {
+      rmSync(home, { recursive: true, force: true })
+    }
+  })
+})
+
+// #63 — the registry's target graph, read the hardened way doctor needs it:
+// never throwing, returning null when the registry cannot be read.
+describe('readRegistryTargets', () => {
+  it('returns null for a missing or non-SQLite file', () => {
+    expect(readRegistryTargets(join(tmpdir(), 'scns-nope-does-not-exist.db'))).toBeNull()
+    const home = tempHome()
+    try {
+      const p = join(home, 'not-a.db')
+      writeFileSync(p, 'definitely not sqlite')
+      expect(readRegistryTargets(p)).toBeNull()
+    } finally {
+      rmSync(home, { recursive: true, force: true })
+    }
+  })
+
+  it('returns every row including the reserved global one, with effective write targets', async () => {
+    const home = tempHome()
+    try {
+      const metaDb = join(home, 'meta-broker.db')
+      const { default: Database } = await import('better-sqlite3')
+      const { applyMetaSchema, registerProject, setGlobalTargets } =
+        await import('../../../src/meta-broker/registry.js')
+      const db = new Database(metaDb)
+      applyMetaSchema(db)
+      setGlobalTargets(db, { upstreamRepo: 'upstream-org/tool', writeTargetRepo: 'me/home' })
+      registerProject(db, {
+        projectId: 'child-a',
+        projectRoot: join(home, 'repo-a'),
+        selfIssueRepo: 'o/legacy', // pre-#63 row shape: alias must carry it
+      })
+      registerProject(db, {
+        projectId: 'child-b',
+        projectRoot: join(home, 'repo-b'),
+        writeTargetRepo: 'me/repo-b',
+      })
+      db.close()
+
+      const rows = readRegistryTargets(metaDb)!
+      const byId = new Map(rows.map((r) => [r.projectId, r]))
+      expect(byId.get('global')).toMatchObject({
+        upstreamRepo: 'upstream-org/tool',
+        writeTargetRepo: 'me/home',
+      })
+      expect(byId.get('child-a')).toMatchObject({
+        upstreamRepo: null,
+        writeTargetRepo: 'o/legacy',
+      })
+      expect(byId.get('child-b')).toMatchObject({ writeTargetRepo: 'me/repo-b' })
+    } finally {
+      rmSync(home, { recursive: true, force: true })
+    }
+  })
+
+  it('reads a pre-#63 registry without the new columns', async () => {
+    const home = tempHome()
+    try {
+      const metaDb = join(home, 'meta-broker.db')
+      const { default: Database } = await import('better-sqlite3')
+      const db = new Database(metaDb)
+      db.exec(`CREATE TABLE projects (
+        project_id TEXT PRIMARY KEY, project_root TEXT NOT NULL, self_issue_repo TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')))`)
+      db.prepare(
+        'INSERT INTO projects (project_id, project_root, self_issue_repo) VALUES (?,?,?)',
+      ).run('old-row', '/abs/old', 'o/legacy')
+      db.close()
+
+      const rows = readRegistryTargets(metaDb)!
+      expect(rows).toHaveLength(1)
+      expect(rows[0]).toMatchObject({
+        projectId: 'old-row',
+        upstreamRepo: null,
+        writeTargetRepo: 'o/legacy',
+      })
+    } finally {
+      rmSync(home, { recursive: true, force: true })
+    }
+  })
+})
+
+// #63 — `meta-broker list` prints each broker's `upstream -> write target`
+// alongside the JSON. Pure formatter so the CLI wiring stays trivial.
+describe('formatTargetGraph', () => {
+  it('prints the global broker first, then each child, with honest placeholders', () => {
+    const lines = formatTargetGraph([
+      {
+        projectId: 'global',
+        projectRoot: '',
+        upstreamRepo: 'upstream-org/tool',
+        writeTargetRepo: 'me/home',
+      },
+      {
+        projectId: 'child-a',
+        projectRoot: '/abs/a',
+        upstreamRepo: null,
+        writeTargetRepo: 'me/repo-a',
+      },
+      { projectId: 'child-b', projectRoot: '/abs/b', upstreamRepo: null, writeTargetRepo: null },
+    ])
+    expect(lines[0]).toContain('global')
+    expect(lines[0]).toContain('upstream-org/tool -> me/home')
+    expect(lines.find((l) => l.includes('child-a'))).toContain('me/repo-a')
+    expect(lines.find((l) => l.includes('child-b'))).toMatch(/unset/i)
+  })
+
+  it('says so when no global row exists yet', () => {
+    const lines = formatTargetGraph([
+      {
+        projectId: 'child-a',
+        projectRoot: '/abs/a',
+        upstreamRepo: null,
+        writeTargetRepo: 'me/repo-a',
+      },
+    ])
+    expect(lines[0]).toContain('global')
+    expect(lines[0]).toMatch(/not configured/i)
   })
 })
 

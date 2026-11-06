@@ -271,6 +271,39 @@ describe('resolveSelfIssueRepo', () => {
     expect(resolveSelfIssueRepo({ explicitRepo: '' })).toEqual({ kind: 'unconfigured' })
     expect(resolveSelfIssueRepo({ explicitRepo: '   ' })).toEqual({ kind: 'unconfigured' })
   })
+
+  // #63: the singleton's target may come from the meta registry's reserved
+  // global row. Precedence: explicit env > registry row > unconfigured/refuse.
+  it('falls back to the registry global row when no explicit repo is set', () => {
+    expect(resolveSelfIssueRepo({ registryRepo: 'me/tool-home' })).toEqual({
+      kind: 'registry',
+      repo: 'me/tool-home',
+    })
+    expect(resolveSelfIssueRepo({ registryRepo: '  me/tool-home  ' })).toEqual({
+      kind: 'registry',
+      repo: 'me/tool-home',
+    })
+  })
+
+  it('an explicit repo wins over the registry row', () => {
+    expect(resolveSelfIssueRepo({ explicitRepo: 'a/b', registryRepo: 'me/tool-home' })).toEqual({
+      kind: 'explicit',
+      repo: 'a/b',
+    })
+  })
+
+  it('a meta child keeps project-origin even when a registry repo is passed', () => {
+    // A child's own registry row reaches it as SCNS_SELF_ISSUE_REPO (explicit);
+    // the GLOBAL row must never leak into a child's resolution.
+    expect(resolveSelfIssueRepo({ instanceId: 'child-1', registryRepo: 'me/tool-home' })).toEqual({
+      kind: 'project-origin',
+    })
+  })
+
+  it('a blank registry repo still refuses', () => {
+    expect(resolveSelfIssueRepo({ registryRepo: '   ' })).toEqual({ kind: 'unconfigured' })
+    expect(resolveSelfIssueRepo({ registryRepo: null })).toEqual({ kind: 'unconfigured' })
+  })
 })
 
 describe('deriveSelfIssueRepoFromGit', () => {
