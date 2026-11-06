@@ -6228,6 +6228,100 @@ meta
     },
   )
 
+// ── Home repository (#64 — public/private split) ─────────────────────
+// Converts a plain clone of the public repo into a self-improvement-capable
+// install: a detached private mirror becomes `origin` (the one remote every
+// GitHub writer acts on), the public repo becomes the fetch-only `upstream`,
+// and the registry's target graph (#63) records both. Interactive,
+// human-invoked, idempotent; never runs unattended.
+const home = program
+  .command('home')
+  .description("Private home repository for this install's self-improvement artifacts")
+
+home
+  .command('setup')
+  .description(
+    'Create or adopt a private home repo, re-point remotes (origin -> home, ' +
+      'upstream -> public repo), seed the registry target graph, and verify',
+  )
+  .option(
+    '--repo <owner/name>',
+    'use this private repository as the home (default: <gh login>/<clone directory name>)',
+  )
+  .option(
+    '--meta-db <path>',
+    'meta-broker registry DB path',
+    join(resolveScnsHome(), '.scns', 'meta-broker.db'),
+  )
+  .action(async (opts: { repo?: string; metaDb: string }) => {
+    const { runHomeSetup } = await import('./cli/home-setup.js')
+    const { execFile: execFileCb } = await import('node:child_process')
+    const { promisify: promisifyFn } = await import('node:util')
+    const execFileP = promisifyFn(execFileCb)
+
+    const run = async (
+      file: 'git' | 'gh',
+      args: readonly string[],
+      runOpts?: { env?: Readonly<Record<string, string>>; cwd?: string },
+    ): Promise<{ ok: boolean; stdout: string; stderr: string }> => {
+      try {
+        const { stdout, stderr } = await execFileP(file, [...args], {
+          ...(runOpts?.cwd !== undefined ? { cwd: runOpts.cwd } : {}),
+          env: runOpts?.env ? { ...process.env, ...runOpts.env } : process.env,
+          windowsHide: true,
+        })
+        return { ok: true, stdout, stderr }
+      } catch (err) {
+        const e = err as { stdout?: string; stderr?: string; message?: string }
+        return { ok: false, stdout: e.stdout ?? '', stderr: e.stderr ?? e.message ?? String(err) }
+      }
+    }
+
+    const { default: Database } = await import('better-sqlite3')
+    const { applyMetaSchema, setGlobalTargets } = await import('./meta-broker/registry.js')
+    const result = await runHomeSetup(
+      { cwd: process.cwd(), repo: opts.repo ?? null },
+      {
+        run,
+        recordTargets: ({ upstreamRepo, writeTargetRepo }) => {
+          mkdirSync(dirname(opts.metaDb), { recursive: true })
+          const db = new Database(opts.metaDb)
+          try {
+            applyMetaSchema(db)
+            setGlobalTargets(db, { upstreamRepo, writeTargetRepo })
+          } finally {
+            db.close()
+          }
+        },
+      },
+    )
+
+    console.log('home setup:')
+    for (const step of result.steps) console.log(`  - ${step}`)
+    if (!result.ok) {
+      console.error(`\nrefused: ${result.refusal}`)
+      process.exitCode = 1
+      return
+    }
+    console.log(`\nhome: ${result.homeRepo}   upstream (fetch-only): ${result.upstreamRepo}`)
+
+    // Finish by running the target-repo doctor checks (#64 step 5), so the
+    // conversion ends with the same verdict `scns doctor` would give.
+    const { runDoctor, defaultDoctorDeps } = await import('./cli/doctor.js')
+    const report = await runDoctor(defaultDoctorDeps())
+    const relevant = report.checks.filter(
+      (c) => c.id === 'unattended-actions' || c.id === 'unattended-target-repo',
+    )
+    console.log('\ntarget-repo checks:')
+    for (const c of relevant) {
+      console.log(
+        `  [${c.status === 'pass' ? 'OK' : c.status.toUpperCase()}] ${c.id} — ${c.detail}`,
+      )
+      if (c.hint && c.status !== 'pass') console.log(`         hint: ${c.hint}`)
+    }
+    if (relevant.some((c) => c.status === 'fail')) process.exitCode = 1
+  })
+
 // ── External health-watchdog (Gap 3) ─────────────────────────────────
 // A SEPARATE process from the broker, so it can catch event-loop hangs
 // the in-process self-heal cannot. Polls /api/health and restarts the
