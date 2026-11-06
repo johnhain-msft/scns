@@ -245,18 +245,31 @@ describe('issueNumberFromSignalKey', () => {
 
 describe('resolveSelfIssueRepo', () => {
   it('an explicit repo always wins', () => {
-    expect(resolveSelfIssueRepo({ explicitRepo: 'a/b', instanceId: 'child-1' })).toBe('a/b')
-    expect(resolveSelfIssueRepo({ explicitRepo: 'a/b' })).toBe('a/b')
+    expect(resolveSelfIssueRepo({ explicitRepo: 'a/b', instanceId: 'child-1' })).toEqual({
+      kind: 'explicit',
+      repo: 'a/b',
+    })
+    expect(resolveSelfIssueRepo({ explicitRepo: 'a/b' })).toEqual({ kind: 'explicit', repo: 'a/b' })
   })
 
-  it('a meta-child (SCNS_INSTANCE_ID set) with no explicit repo resolves to undefined (no SCNS fallback)', () => {
-    expect(resolveSelfIssueRepo({ instanceId: 'child-1' })).toBeUndefined()
-    expect(resolveSelfIssueRepo({ explicitRepo: '   ', instanceId: 'child-1' })).toBeUndefined()
+  it('trims the explicit repo', () => {
+    expect(resolveSelfIssueRepo({ explicitRepo: '  a/b  ' })).toEqual({
+      kind: 'explicit',
+      repo: 'a/b',
+    })
   })
 
-  it('the singleton (no instanceId) keeps the historical johnhain-msft/scns default', () => {
-    expect(resolveSelfIssueRepo({})).toBe('johnhain-msft/scns')
-    expect(resolveSelfIssueRepo({ explicitRepo: '' })).toBe('johnhain-msft/scns')
+  it('a meta-child (SCNS_INSTANCE_ID set) with no explicit repo derives from its own project origin', () => {
+    expect(resolveSelfIssueRepo({ instanceId: 'child-1' })).toEqual({ kind: 'project-origin' })
+    expect(resolveSelfIssueRepo({ explicitRepo: '   ', instanceId: 'child-1' })).toEqual({
+      kind: 'project-origin',
+    })
+  })
+
+  it('#58 — the singleton with no explicit repo is UNCONFIGURED, never a hardcoded upstream default', () => {
+    expect(resolveSelfIssueRepo({})).toEqual({ kind: 'unconfigured' })
+    expect(resolveSelfIssueRepo({ explicitRepo: '' })).toEqual({ kind: 'unconfigured' })
+    expect(resolveSelfIssueRepo({ explicitRepo: '   ' })).toEqual({ kind: 'unconfigured' })
   })
 })
 

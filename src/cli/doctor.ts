@@ -12,14 +12,17 @@
  * system; tests exercise every branch on any host. Output is ASCII-only so
  * cmd.exe renders it faithfully.
  */
+import { execFile } from 'node:child_process'
 import { existsSync as fsExistsSync, readdirSync, readFileSync as fsReadFileSync } from 'node:fs'
 import { writeFileSync, rmSync, mkdirSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { homedir as osHomedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { promisify } from 'node:util'
 
 import { resolveScnsHome } from '../shared/scns-home.js'
+import { deriveSelfIssueRepoFromGit } from '../brain/self-issue-source.js'
 import {
   isProcessAlive,
   readLiveBrokerPid,
@@ -39,9 +42,13 @@ import {
   UNATTENDED_MASTER_ENV,
   isUnattendedEnabled,
   unattendedEnvVar,
+  type UnattendedFeature,
 } from '../shared/unattended.js'
 
 export type CheckStatus = 'pass' | 'fail' | 'warn' | 'info'
+
+/** #58 — how the authenticated `gh` account relates to a target repo. */
+export type RepoOwnership = 'owned' | 'not-owned' | 'unverifiable'
 
 /**
  * Node majors SCNS actually runs on.
@@ -111,6 +118,10 @@ export interface DoctorDeps {
   readonly countRegisteredProjects?: (metaDbPath: string) => number | null
   /** #61 — pid recorded in a runtime pidfile whose process is alive, or null. */
   readonly readLivePid?: (pidfilePath: string) => number | null
+  /** #58 — GitHub `owner/name` of a directory's origin remote, or null. */
+  readonly getOriginRepoSlug?: (dir: string) => Promise<string | null>
+  /** #58 — whether the authenticated gh account owns (is admin on) `slug`. */
+  readonly probeRepoOwnership?: (slug: string) => Promise<RepoOwnership>
 }
 
 function defaultListDir(path: string): ReadonlyArray<string> {
@@ -159,6 +170,28 @@ function createRequireForDoctor(): NodeRequire {
   return createRequire(import.meta.url)
 }
 
+const execFileAsync = promisify(execFile)
+
+/**
+ * #58 — default ownership probe: `gh repo view` reports the viewer's
+ * permission on the repo; only ADMIN counts as ownership. Any failure
+ * (gh missing, unauthenticated, repo unreachable) is `unverifiable`,
+ * which the target check treats as a FAIL — consent to write somewhere
+ * must be verifiable, not assumed.
+ */
+async function defaultProbeRepoOwnership(slug: string): Promise<RepoOwnership> {
+  try {
+    const { stdout } = await execFileAsync(
+      'gh',
+      ['repo', 'view', slug, '--json', 'viewerPermission', '-q', '.viewerPermission'],
+      { windowsHide: true },
+    )
+    return stdout.trim() === 'ADMIN' ? 'owned' : 'not-owned'
+  } catch {
+    return 'unverifiable'
+  }
+}
+
 async function defaultHttpGet(url: string, headers?: Record<string, string>): Promise<HttpResult> {
   const res = await fetch(url, {
     ...(headers ? { headers } : {}),
@@ -190,6 +223,8 @@ export function defaultDoctorDeps(): DoctorDeps {
     httpGet: defaultHttpGet,
     countRegisteredProjects,
     readLivePid: (p: string) => readLiveBrokerPid(p),
+    getOriginRepoSlug: (dir: string) => deriveSelfIssueRepoFromGit(dir),
+    probeRepoOwnership: defaultProbeRepoOwnership,
   }
 }
 
@@ -259,7 +294,7 @@ export async function runDoctor(deps: DoctorDeps): Promise<DoctorReport> {
           detail: native.detail,
           hint: abiMismatch
             ? `this is the ABI of the Node running \`scns doctor\` (${deps.nodeVersion}), ` +
-              "not necessarily the one running the stack — see `broker-reachable` for " +
+              'not necessarily the one running the stack — see `broker-reachable` for ' +
               'whether the live broker loads it. To clear this locally, run doctor under ' +
               'the pinned Node, or install the prebuild for THIS Node: ' +
               '`cd node_modules/better-sqlite3 && node ../prebuild-install/bin.js ' +
@@ -501,7 +536,89 @@ export async function runDoctor(deps: DoctorDeps): Promise<DoctorReport> {
         },
   )
 
-  // 13. Supervision root (#61) — DURABILITY, not current health.
+  // 13. Unattended target repos (#58) — the check above answers "is
+  // anything allowed to act?"; this one answers "and at WHAT repo?". An
+  // enabled writer with no resolvable target, or a target the authenticated
+  // account does not own, is a misdirected daemon: it would push branches
+  // or file issues on somebody else's repository — most likely the public
+  // upstream this install was cloned from. That is a FAIL, not a warning,
+  // and it fails CLOSED when ownership cannot be verified.
+  const githubWritingFeatures: readonly UnattendedFeature[] = [
+    'gate-pass-publisher',
+    'north-star-nudge',
+    'drift-watchdog',
+  ]
+  const enabledGithubWriters = githubWritingFeatures.filter((f) => isUnattendedEnabled(f, deps.env))
+  const selfIssueTarget = (deps.env['SCNS_SELF_ISSUE_REPO'] ?? '').trim()
+  if (enabledGithubWriters.length === 0 && selfIssueTarget === '') {
+    add({
+      id: 'unattended-target-repo',
+      status: 'info',
+      detail:
+        'no unattended GitHub writer is enabled and no self-issue target is set — nothing to verify',
+    })
+  } else {
+    const problems: string[] = []
+    const targets = new Map<string, readonly string[]>()
+    const noteTarget = (slug: string, source: string): void => {
+      targets.set(slug, [...(targets.get(slug) ?? []), source])
+    }
+    if (enabledGithubWriters.length > 0) {
+      // The writers act on the origin remote of the broker's project root —
+      // same resolution the broker itself uses (BROKER_PROJECT_ROOT, else cwd).
+      const writerRoot = deps.env['BROKER_PROJECT_ROOT'] ?? deps.cwd
+      const writerNames = enabledGithubWriters.join(' + ')
+      const slug = await (deps.getOriginRepoSlug ?? deriveSelfIssueRepoFromGit)(writerRoot)
+      if (slug === null) {
+        problems.push(
+          `${writerNames} act on the origin remote of ${writerRoot}, ` +
+            'which has no GitHub origin — their target is unset',
+        )
+      } else {
+        noteTarget(slug, writerNames)
+      }
+    }
+    if (selfIssueTarget !== '') {
+      noteTarget(selfIssueTarget, 'self-issue ingestion (SCNS_SELF_ISSUE_REPO)')
+    }
+    const probeOwnership = deps.probeRepoOwnership ?? defaultProbeRepoOwnership
+    const verified: string[] = []
+    for (const [slug, sources] of targets) {
+      const ownership = await probeOwnership(slug)
+      if (ownership === 'owned') {
+        verified.push(`${slug} (${sources.join('; ')})`)
+      } else if (ownership === 'not-owned') {
+        problems.push(
+          `${slug} (${sources.join('; ')}) is not owned by the authenticated gh account`,
+        )
+      } else {
+        problems.push(
+          `${slug} (${sources.join('; ')}) ownership could not be verified — ` +
+            'is gh installed and authenticated?',
+        )
+      }
+    }
+    add(
+      problems.length === 0
+        ? {
+            id: 'unattended-target-repo',
+            status: 'pass',
+            detail: `every target is owned by the authenticated account: ${verified.join(', ')}`,
+          }
+        : {
+            id: 'unattended-target-repo',
+            status: 'fail',
+            detail: problems.join('; '),
+            hint:
+              'every unattended writer must target a repository the authenticated account ' +
+              'owns (for SCNS self-improvement that means your own private fork, never the ' +
+              'public upstream) — set SCNS_SELF_ISSUE_REPO / fix the origin remote, or ' +
+              'disable the writer',
+          },
+    )
+  }
+
+  // 14. Supervision root (#61) — DURABILITY, not current health.
   //
   // Every check above asks "is it up now?". This one asks "will anything bring
   // it back?" — the question that would have caught an 11h47m outage while the
@@ -510,7 +627,7 @@ export async function runDoctor(deps: DoctorDeps): Promise<DoctorReport> {
   const supervisionRoot = supervisionRootCheck(deps, supervisionPort)
   add(supervisionRoot)
 
-  // 14. Meta-broker supervision (#61).
+  // 15. Meta-broker supervision (#61).
   //
   // The meta-broker fails quietly and totally: when it dies every per-project
   // child dies with it, and every session in every registered repo silently
@@ -519,7 +636,7 @@ export async function runDoctor(deps: DoctorDeps): Promise<DoctorReport> {
   // GLOBAL broker stays perfectly healthy throughout.
   add(metaBrokerSupervisionCheck(deps, registryPath))
 
-  // 14. Self-heal arming (#61). Self-heal drains and exit(1)s expecting a
+  // 16. Self-heal arming (#61). Self-heal drains and exit(1)s expecting a
   // supervisor to relaunch. Where none exists that is a permanent death, so
   // say out loud which way this host is configured.
   const arming = decideSelfHealArming({ platform: deps.platform, env: deps.env })

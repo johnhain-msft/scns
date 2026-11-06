@@ -81,6 +81,7 @@ describe('runDoctor — healthy machine', () => {
       'extension-installed',
       'strict-mode',
       'unattended-actions',
+      'unattended-target-repo',
       'supervision-root',
       'meta-broker-supervision',
       'self-heal-arming',
@@ -322,6 +323,8 @@ describe('runDoctor — per-layer failures carry actionable hints', () => {
   it('names each unattended action that is enabled, and warns', async () => {
     const report = await run({
       env: { BROKER_PUBLISH_GATE_PASS: '1', SCNS_DRIFT_WATCHDOG: '1' },
+      getOriginRepoSlug: async () => 'j/repo',
+      probeRepoOwnership: async () => 'owned',
     })
     const c = check(report, 'unattended-actions')
     expect(c.status).toBe('warn')
@@ -333,11 +336,99 @@ describe('runDoctor — per-layer failures carry actionable hints', () => {
   })
 
   it('surfaces the family switch turning the whole set on', async () => {
-    const report = await run({ env: { SCNS_UNATTENDED: '1' } })
+    const report = await run({
+      env: { SCNS_UNATTENDED: '1' },
+      getOriginRepoSlug: async () => 'j/repo',
+      probeRepoOwnership: async () => 'owned',
+    })
     const c = check(report, 'unattended-actions')
     expect(c.status).toBe('warn')
     expect(c.detail).toContain('gate-pass-publisher')
     expect(c.detail).toContain('team-task-autospawner')
+  })
+})
+
+// #58 — an enabled unattended writer must act on a repository the
+// authenticated account owns. The check FAILS (not warns) on a missing or
+// foreign target: a misdirected daemon would push branches or file issues
+// on somebody else's repo — most likely the public upstream this install
+// was cloned from.
+describe('runDoctor — unattended target repo (#58)', () => {
+  it('has nothing to verify when no GitHub writer is enabled and no self-issue target is set', async () => {
+    const report = await run()
+    const c = check(report, 'unattended-target-repo')
+    expect(c.status).toBe('info')
+    expect(c.detail).toMatch(/nothing to verify/i)
+    expect(report.ok).toBe(true)
+  })
+
+  it('passes when an enabled writer targets a repo the authenticated account owns', async () => {
+    const report = await run({
+      env: { BROKER_PUBLISH_GATE_PASS: '1' },
+      getOriginRepoSlug: async () => 'me/my-fork',
+      probeRepoOwnership: async () => 'owned',
+    })
+    const c = check(report, 'unattended-target-repo')
+    expect(c.status).toBe('pass')
+    expect(c.detail).toContain('me/my-fork')
+  })
+
+  it('FAILS when an enabled writer has no resolvable GitHub target', async () => {
+    const report = await run({
+      env: { BROKER_NORTH_STAR_NUDGE: '1' },
+      getOriginRepoSlug: async () => null,
+    })
+    const c = check(report, 'unattended-target-repo')
+    expect(c.status).toBe('fail')
+    expect(c.detail).toContain('north-star-nudge')
+    expect(report.ok).toBe(false)
+  })
+
+  it('FAILS when the target repo is not owned by the authenticated account', async () => {
+    const report = await run({
+      env: { BROKER_PUBLISH_GATE_PASS: '1' },
+      getOriginRepoSlug: async () => 'someone-else/scns',
+      probeRepoOwnership: async () => 'not-owned',
+    })
+    const c = check(report, 'unattended-target-repo')
+    expect(c.status).toBe('fail')
+    expect(c.detail).toContain('someone-else/scns')
+    expect(report.ok).toBe(false)
+  })
+
+  it('FAILS closed when ownership cannot be verified', async () => {
+    const report = await run({
+      env: { SCNS_DRIFT_WATCHDOG: '1' },
+      getOriginRepoSlug: async () => 'me/my-fork',
+      probeRepoOwnership: async () => 'unverifiable',
+    })
+    const c = check(report, 'unattended-target-repo')
+    expect(c.status).toBe('fail')
+    expect(c.detail).toMatch(/gh/i)
+    expect(report.ok).toBe(false)
+  })
+
+  it('verifies a set SCNS_SELF_ISSUE_REPO even when the unattended family is OFF', async () => {
+    const report = await run({
+      env: { SCNS_SELF_ISSUE_REPO: 'someone-else/scns' },
+      probeRepoOwnership: async () => 'not-owned',
+    })
+    const c = check(report, 'unattended-target-repo')
+    expect(c.status).toBe('fail')
+    expect(c.detail).toContain('someone-else/scns')
+  })
+
+  it('uses BROKER_PROJECT_ROOT, when set, as the directory whose origin the writers act on', async () => {
+    const seen: string[] = []
+    await run({
+      env: { BROKER_PUBLISH_GATE_PASS: '1', BROKER_PROJECT_ROOT: '/srv/work-repo' },
+      getOriginRepoSlug: async (dir) => {
+        seen.push(dir)
+        return 'me/my-fork'
+      },
+      probeRepoOwnership: async () => 'owned',
+    })
+    expect(seen).toEqual(['/srv/work-repo'])
   })
 })
 

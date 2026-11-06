@@ -8,8 +8,10 @@
 
 The `self-issue-ingest` scheduled task (`src/cli.ts`, handler registered per broker) pulls
 open issues from the repo resolved by `resolveSelfIssueRepo` (`src/brain/self-issue-source.ts`):
-`SCNS_SELF_ISSUE_REPO` env wins; a meta-child with no explicit repo ingests nothing; the
-singleton defaults to `johnhain-msft/scns`.
+`SCNS_SELF_ISSUE_REPO` env wins; a meta-child with no explicit repo derives the repo from
+its own project's origin remote; the singleton with no explicit repo REFUSES to ingest
+(#58 — there is no default target, because the historical hardcoded default pointed every
+install at the public upstream repo).
 
 **Allowlist gate.** A child ingests ONLY issues carrying at least one label from its
 `SCNS_SELF_ISSUE_LABELS` allowlist (comma-separated env). The Cosmere child's allowlist is

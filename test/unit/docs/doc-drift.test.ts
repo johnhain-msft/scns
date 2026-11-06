@@ -106,6 +106,7 @@ describe('README stays true to the code', () => {
       'Thirteen',
       'Fourteen',
       'Fifteen',
+      'Sixteen',
     ]
     expect(readme).toContain(`${words[report.checks.length]} checks run`)
     for (const c of report.checks) {
