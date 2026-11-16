@@ -3,7 +3,7 @@
  */
 
 import { mkdirSync, writeFileSync, readFileSync, existsSync, chmodSync } from 'node:fs'
-import { execSync } from 'node:child_process'
+import { execFileSync } from 'node:child_process'
 import {
   delimiter,
   dirname,
@@ -17,6 +17,7 @@ import {
 import { homedir } from 'node:os'
 import { resolveScnsHome } from '../shared/scns-home.js'
 import type { Suggestion } from './types.js'
+import { parseCommandArgv } from './command-argv.js'
 import { generateArtifact } from './artifact-generators.js'
 import type { ArtifactOutput } from './artifact-generators.js'
 import { ScnsError } from '../shared/errors.js'
@@ -1125,7 +1126,9 @@ export function createExecutor(options?: ExecutorOptions) {
         }
         mkdirSync(step.target, { recursive: true })
         const planJson = readFileSync(planPath, 'utf-8')
-        execSync(`node ${JSON.stringify(runnerPath)}`, {
+        // No shell: the runner path is a single argv entry, so spaces or
+        // shell-special characters in it are data, not syntax.
+        execFileSync(process.execPath, [runnerPath], {
           cwd: step.target,
           input: planJson,
           timeout: 60_000,
@@ -1153,9 +1156,20 @@ export function createExecutor(options?: ExecutorOptions) {
       if (dangerous.test(cmd)) {
         return { ok: false, error: `RunCommand blocked dangerous command: ${cmd}` }
       }
+      // No shell is ever spawned: the command must parse as plain argv.
+      // Shell operators (pipes, redirection, `;`, `$(...)`, backticks) are
+      // refused outright — that is what makes the denylist above a second
+      // line of defence instead of the only one.
+      const argv = parseCommandArgv(cmd)
+      if (!argv) {
+        return {
+          ok: false,
+          error: `RunCommand refused: no shell is spawned, so shell operators and unbalanced quotes are not supported: ${cmd}`,
+        }
+      }
       try {
         const cwd = step.target ?? process.cwd()
-        execSync(cmd, {
+        execFileSync(argv[0]!, argv.slice(1), {
           cwd,
           timeout: 30_000,
           stdio: 'pipe',

@@ -43,4 +43,10 @@ process.env['SCNS_LOG_LEVEL'] ||= 'silent'
 // transport. At level 'silent' pino emits nothing regardless of
 // transport, but explicitly marking the env as 'test' prevents any
 // future transport from spinning up an idle worker thread per file.
-process.env['NODE_ENV'] ||= 'test'
+//
+// Assigned unconditionally (not `||=`): a deployment shell exports
+// NODE_ENV=production, and `||=` kept it, so production-mode branches
+// (express error handling, logger transports) ran under test on exactly
+// the machines that also run the live broker. CI never sets NODE_ENV,
+// so forcing 'test' makes every machine match the CI reference.
+process.env['NODE_ENV'] = 'test'

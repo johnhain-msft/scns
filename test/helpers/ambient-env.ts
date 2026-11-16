@@ -63,6 +63,32 @@ export const SCRUBBED_VARS = [
   'SCNS_DRIFT_WATCHDOG',
   'SCNS_REQUIRE_PROJECT_BROKER',
   'SCNS_UNATTENDED',
+  // 2026-11-16: the flags a LIVE deployment shell exports (measured on the
+  // Mac deployment machine: a terminal that once sourced the broker's env
+  // kept them, and every vitest worker inherited them — ~54 failures across
+  // 11 files on a branch that was green in CI). `BROKER_PROJECT_ROOT` alone
+  // turns every in-process broker into a project-pinned child, so the
+  // "global broker (no project root)" route tests answer 409 instead of 200.
+  // Each name was checked against PRESERVED_VARS; none is a sandbox knob.
+  'BROKER_AUTO_MERGE',
+  'BROKER_PROJECT_ROOT',
+  'SCNS_DREAM_MAINTENANCE',
+  'SCNS_EMBED_IDLE_MS',
+  'SCNS_EXPLORE_EPSILON',
+  'SCNS_EXPLORE_ROUTING',
+  'SCNS_EXTRACT_FACTS',
+  'SCNS_IDEATE_GATE_ENFORCE',
+  'SCNS_IDEATE_MEMORY',
+  'SCNS_MAX_CONCURRENT_AGENTS',
+  'SCNS_QG_BEHAVIORAL_GATE',
+  'SCNS_QG_BEHAVIORAL_RETRIEVAL',
+  'SCNS_QG_CLAIM_ENFORCE',
+  'SCNS_QG_CLAIM_SPAWN',
+  'SCNS_SELF_ISSUE_LABELS',
+  'SCNS_SEMANTIC_EDGES',
+  'SCNS_SEMANTIC_ROUTING',
+  'SCNS_SUGGEST_AUTO_APPROVE_THRESHOLD',
+  'SCNS_SUGGEST_DEDUP_WINDOW_DAYS',
 ] as const
 
 /** Variables that survive the scrub because an operator sets them on purpose. */

@@ -1,6 +1,9 @@
 /**
  * Registers core MCP tools on the McpServer.
- * Each tool wraps a broker operation with Zod-validated input.
+ * Each tool wraps a broker operation with Zod-validated input, and declares
+ * the full MCP annotation set (readOnlyHint / destructiveHint /
+ * idempotentHint / openWorldHint) so clients can reason about side effects
+ * without guessing from the name.
  */
 
 import { randomUUID } from 'node:crypto'
@@ -47,6 +50,26 @@ function errorResult(message: string): ToolResult {
   return { content: [{ type: 'text', text: JSON.stringify({ error: message }) }], isError: true }
 }
 
+/** Broker tools touch only this broker's own SQLite state — a closed world. */
+const LOCAL_WRITE = {
+  readOnlyHint: false,
+  destructiveHint: false,
+  idempotentHint: false,
+  openWorldHint: false,
+} as const
+
+/** Same as LOCAL_WRITE, but safe to retry: repeating the call converges on
+ * the same state instead of stacking a second effect. */
+const LOCAL_WRITE_IDEMPOTENT = { ...LOCAL_WRITE, idempotentHint: true } as const
+
+/** Pure reads of broker state. */
+const LOCAL_READ = {
+  readOnlyHint: true,
+  destructiveHint: false,
+  idempotentHint: true,
+  openWorldHint: false,
+} as const
+
 export function registerTools(
   server: McpServer,
   db: Database.Database,
@@ -85,31 +108,50 @@ export function registerTools(
         }
       },
     })
-    server.tool(
+    server.registerTool(
       'ask_human',
-      'Deliver a clarifying question to the human (no external contact, no spend; audited)',
       {
-        question: z
-          .string()
-          .min(1)
-          .max(ASK_HUMAN_MAX_CHARS)
-          .describe('The clarifying question for the human'),
+        title: 'Ask the human',
+        description:
+          'Deliver a clarifying question to the human (no external contact, no spend; audited)',
+        inputSchema: {
+          question: z
+            .string()
+            .min(1)
+            .max(ASK_HUMAN_MAX_CHARS)
+            .describe('The clarifying question for the human'),
+        },
+        // Appends one audited question event per call — local, additive,
+        // and deliberately not idempotent (each call is a new question).
+        annotations: LOCAL_WRITE,
       },
       async (args) => {
         const res = askHuman.askHuman({ question: args.question })
         return res.allowed ? textResult(res) : errorResult(res.detail)
       },
     )
-    server.tool(
+    server.registerTool(
       'consult_source',
-      'Read an APPROVED-LIST source (deny-all by default; spend always refused; audited)',
       {
-        url: z.string().url().describe('The source URL to consult'),
-        reason: z
-          .string()
-          .min(1)
-          .max(CONSULT_REASON_MAX_CHARS)
-          .describe('Why this source is needed (recorded in the audit trail)'),
+        title: 'Consult approved source',
+        description:
+          'Read an APPROVED-LIST source (deny-all by default; spend always refused; audited)',
+        inputSchema: {
+          url: z.string().url().describe('The source URL to consult'),
+          reason: z
+            .string()
+            .min(1)
+            .max(CONSULT_REASON_MAX_CHARS)
+            .describe('Why this source is needed (recorded in the audit trail)'),
+        },
+        // The one open-world tool: it fetches an external URL (allowlisted,
+        // deny-all by default) and modifies nothing.
+        annotations: {
+          readOnlyHint: true,
+          destructiveHint: false,
+          idempotentHint: true,
+          openWorldHint: true,
+        },
       },
       async (args) => {
         const res = await consultSource.consultSource({ url: args.url, reason: args.reason })
@@ -117,13 +159,19 @@ export function registerTools(
       },
     )
   }
-  server.tool(
+  server.registerTool(
     'register_session',
-    'Register a new session with the broker',
     {
-      id: z.string().describe('Unique session identifier'),
-      purpose: z.string().describe('Purpose of the session'),
-      working_dir: z.string().optional().describe('Working directory'),
+      title: 'Register session',
+      description: 'Register a new session with the broker',
+      inputSchema: {
+        id: z.string().describe('Unique session identifier'),
+        purpose: z.string().describe('Purpose of the session'),
+        working_dir: z.string().optional().describe('Working directory'),
+      },
+      // Idempotent by design (issue #70): re-registering a known id revives
+      // the existing row instead of failing, so retries are safe.
+      annotations: LOCAL_WRITE_IDEMPOTENT,
     },
     async (args) => {
       try {
@@ -158,11 +206,18 @@ export function registerTools(
     },
   )
 
-  server.tool(
+  server.registerTool(
     'deregister_session',
-    'Deregister a session from the broker',
     {
-      id: z.string().describe('Session ID to deregister'),
+      title: 'Deregister session',
+      description: 'Deregister a session from the broker',
+      inputSchema: {
+        id: z.string().describe('Session ID to deregister'),
+      },
+      // Marks the session completed — a reversible status transition
+      // (register_session revives it), so not destructive; repeating it
+      // converges on the same completed state.
+      annotations: LOCAL_WRITE_IDEMPOTENT,
     },
     async (args) => {
       try {
@@ -179,23 +234,29 @@ export function registerTools(
     },
   )
 
-  server.tool(
+  server.registerTool(
     'send_message',
-    'Send a message to another session',
     {
-      sender_id: z.string().describe('Sender session ID'),
-      receiver_id: z
-        .string()
-        .nullable()
-        .optional()
-        .describe('Receiver session ID (null for broadcast)'),
-      content: z.string().describe('Message content'),
-      client_message_id: z
-        .string()
-        .optional()
-        .describe(
-          'Stable client id for safe retries (issue #70): same id + same payload replays the original message; conflicting reuse is rejected',
-        ),
+      title: 'Send message',
+      description: 'Send a message to another session',
+      inputSchema: {
+        sender_id: z.string().describe('Sender session ID'),
+        receiver_id: z
+          .string()
+          .nullable()
+          .optional()
+          .describe('Receiver session ID (null for broadcast)'),
+        content: z.string().describe('Message content'),
+        client_message_id: z
+          .string()
+          .optional()
+          .describe(
+            'Stable client id for safe retries (issue #70): same id + same payload replays the original message; conflicting reuse is rejected',
+          ),
+      },
+      // Each bare call delivers a new message; retries are only safe via
+      // client_message_id replay, so the hint stays non-idempotent.
+      annotations: LOCAL_WRITE,
     },
     async (args) => {
       try {
@@ -244,15 +305,21 @@ export function registerTools(
     },
   )
 
-  server.tool(
+  server.registerTool(
     'ack_message',
-    'Record an explicit disposition (accepted/rejected/deferred) for a received message — a send response alone is never an acknowledgement',
     {
-      message_id: z.string().describe('Message ID to acknowledge'),
-      disposition: z
-        .enum(['accepted', 'rejected', 'deferred'])
-        .describe('Explicit verdict on the message'),
-      note: z.string().optional().describe('Optional rationale recorded with the disposition'),
+      title: 'Acknowledge message',
+      description:
+        'Record an explicit disposition (accepted/rejected/deferred) for a received message — a send response alone is never an acknowledgement',
+      inputSchema: {
+        message_id: z.string().describe('Message ID to acknowledge'),
+        disposition: z
+          .enum(['accepted', 'rejected', 'deferred'])
+          .describe('Explicit verdict on the message'),
+        note: z.string().optional().describe('Optional rationale recorded with the disposition'),
+      },
+      // Re-recording the same disposition converges on the same row state.
+      annotations: LOCAL_WRITE_IDEMPOTENT,
     },
     async (args) => {
       try {
@@ -279,12 +346,16 @@ export function registerTools(
     },
   )
 
-  server.tool(
+  server.registerTool(
     'get_messages',
-    'Get messages for a receiver session',
     {
-      receiver_id: z.string().describe('Receiver session ID'),
-      unread_only: z.boolean().optional().describe('Only return unread messages'),
+      title: 'Get messages',
+      description: 'Get messages for a receiver session',
+      inputSchema: {
+        receiver_id: z.string().describe('Receiver session ID'),
+        unread_only: z.boolean().optional().describe('Only return unread messages'),
+      },
+      annotations: LOCAL_READ,
     },
     async (args) => {
       try {
@@ -298,11 +369,17 @@ export function registerTools(
     },
   )
 
-  server.tool(
+  server.registerTool(
     'heartbeat',
-    'Send a heartbeat for a session',
     {
-      session_id: z.string().describe('Session ID'),
+      title: 'Session heartbeat',
+      description: 'Send a heartbeat for a session',
+      inputSchema: {
+        session_id: z.string().describe('Session ID'),
+      },
+      // Repeated heartbeats assert the same fact (the session is alive);
+      // only the timestamp moves, so retries are harmless.
+      annotations: LOCAL_WRITE_IDEMPOTENT,
     },
     async (args) => {
       try {
@@ -330,12 +407,17 @@ export function registerTools(
     },
   )
 
-  server.tool(
+  server.registerTool(
     'create_team',
-    'Create a new team',
     {
-      name: z.string().describe('Team name'),
-      description: z.string().optional().describe('Team description'),
+      title: 'Create team',
+      description: 'Create a new team',
+      inputSchema: {
+        name: z.string().describe('Team name'),
+        description: z.string().optional().describe('Team description'),
+      },
+      // Each call mints a new team row — not idempotent.
+      annotations: LOCAL_WRITE,
     },
     async (args) => {
       try {
@@ -348,14 +430,18 @@ export function registerTools(
     },
   )
 
-  server.tool(
+  server.registerTool(
     'join_team',
-    'Join a session to a team',
     {
-      team_id: z.string().describe('Team ID'),
-      session_id: z.string().describe('Session ID'),
-      name: z.string().describe('Member display name'),
-      role: z.string().optional().describe('Member role'),
+      title: 'Join team',
+      description: 'Join a session to a team',
+      inputSchema: {
+        team_id: z.string().describe('Team ID'),
+        session_id: z.string().describe('Session ID'),
+        name: z.string().describe('Member display name'),
+        role: z.string().optional().describe('Member role'),
+      },
+      annotations: LOCAL_WRITE,
     },
     async (args) => {
       try {
@@ -373,16 +459,22 @@ export function registerTools(
 
   // P4 (de-hardcode roles): self-innovate. Lets an agent mint a brand-new agent
   // role at runtime (catalogue entry) without a code/schema change.
-  server.tool(
+  server.registerTool(
     'register_role',
-    'Register a new agent role at runtime (self-innovate). The role becomes usable on team members immediately.',
     {
-      role: z.string().describe('Role identifier (e.g. "security-auditor")'),
-      description: z.string().optional().describe('What this role does'),
-      spawnable: z
-        .boolean()
-        .optional()
-        .describe('Whether this role has a task-spawn prompt strategy (advisory metadata)'),
+      title: 'Register agent role',
+      description:
+        'Register a new agent role at runtime (self-innovate). The role becomes usable on team members immediately.',
+      inputSchema: {
+        role: z.string().describe('Role identifier (e.g. "security-auditor")'),
+        description: z.string().optional().describe('What this role does'),
+        spawnable: z
+          .boolean()
+          .optional()
+          .describe('Whether this role has a task-spawn prompt strategy (advisory metadata)'),
+      },
+      // registerRole is an upsert (ON CONFLICT DO UPDATE) — safe to retry.
+      annotations: LOCAL_WRITE_IDEMPOTENT,
     },
     async (args) => {
       try {
@@ -399,19 +491,32 @@ export function registerTools(
     },
   )
 
-  server.tool('list_roles', 'List all registered agent roles', {}, async () => {
-    try {
-      return textResult({ roles: listRoles(db) })
-    } catch (err) {
-      return errorResult(err instanceof Error ? err.message : 'Unknown error')
-    }
-  })
-
-  server.tool(
-    'list_sessions',
-    'List all active sessions',
+  server.registerTool(
+    'list_roles',
     {
-      status: z.string().optional().describe('Filter by status'),
+      title: 'List agent roles',
+      description: 'List all registered agent roles',
+      inputSchema: {},
+      annotations: LOCAL_READ,
+    },
+    async () => {
+      try {
+        return textResult({ roles: listRoles(db) })
+      } catch (err) {
+        return errorResult(err instanceof Error ? err.message : 'Unknown error')
+      }
+    },
+  )
+
+  server.registerTool(
+    'list_sessions',
+    {
+      title: 'List sessions',
+      description: 'List all active sessions',
+      inputSchema: {
+        status: z.string().optional().describe('Filter by status'),
+      },
+      annotations: LOCAL_READ,
     },
     async (args) => {
       try {

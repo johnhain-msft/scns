@@ -9,17 +9,27 @@ import {
 } from '../../../../src/broker/storage/repositories/session-repository.js'
 
 // ── McpServer mock ──────────────────────────────────────────
-// Capture handlers registered via server.tool() so we can invoke them directly.
+// Capture handlers registered via server.registerTool() so we can invoke
+// them directly.
 
 type ToolHandler = (args: Record<string, unknown>) => Promise<{
   content: Array<{ type: 'text'; text: string }>
   isError?: boolean
 }>
 
+interface ToolConfig {
+  title?: string
+  description?: string
+  inputSchema?: Record<string, unknown>
+  annotations?: Record<string, unknown>
+}
+
 interface CapturedTool {
   name: string
+  title: string
   description: string
   schema: Record<string, unknown>
+  annotations: Record<string, unknown>
   handler: ToolHandler
 }
 
@@ -27,16 +37,16 @@ function createMockServer() {
   const tools = new Map<string, CapturedTool>()
 
   const server = {
-    tool: vi.fn(
-      (
-        name: string,
-        description: string,
-        schema: Record<string, unknown>,
-        handler: ToolHandler,
-      ) => {
-        tools.set(name, { name, description, schema, handler })
-      },
-    ),
+    registerTool: vi.fn((name: string, config: ToolConfig, handler: ToolHandler) => {
+      tools.set(name, {
+        name,
+        title: config.title ?? '',
+        description: config.description ?? '',
+        schema: config.inputSchema ?? {},
+        annotations: config.annotations ?? {},
+        handler,
+      })
+    }),
   }
 
   return {
@@ -108,6 +118,29 @@ describe('registerTools', () => {
         expect(tool.description).toBeTruthy()
       }
     })
+
+    it('each tool declares a title and the complete MCP annotation set', () => {
+      // Clients use these hints to reason about side effects; a missing hint
+      // falls back to a spec default (destructiveHint=true, openWorldHint=true)
+      // that misdescribes most broker tools, so every hint must be explicit.
+      for (const [name, tool] of tools) {
+        expect(tool.title, `${name} must declare a title`).toBeTruthy()
+        for (const hint of [
+          'readOnlyHint',
+          'destructiveHint',
+          'idempotentHint',
+          'openWorldHint',
+        ] as const) {
+          expect(typeof tool.annotations[hint], `${name} must declare ${hint}`).toBe('boolean')
+        }
+      }
+    })
+
+    it('read-only tools are marked as such', () => {
+      for (const name of ['get_messages', 'list_roles', 'list_sessions']) {
+        expect(tools.get(name)!.annotations['readOnlyHint'], `${name}`).toBe(true)
+      }
+    })
   })
 
   // ── register_session ────────────────────────────────────────
@@ -159,7 +192,9 @@ describe('registerTools', () => {
       const handler = tools.get('register_session')!.handler
       await handler({ id: 'dup', purpose: 'first', working_dir: '/w' })
       testDb.db
-        .prepare("UPDATE sessions SET status = 'expired', archived_at = datetime('now') WHERE id = 'dup'")
+        .prepare(
+          "UPDATE sessions SET status = 'expired', archived_at = datetime('now') WHERE id = 'dup'",
+        )
         .run()
 
       const result = await handler({ id: 'dup', purpose: 'second', working_dir: '/w' })

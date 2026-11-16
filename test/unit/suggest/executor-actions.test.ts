@@ -352,12 +352,14 @@ describe('Executor actions — RunCommand', () => {
   it('executes command at autonomy level 3', () => {
     const executor = createExecutor({ autonomyLevel: 3, configBaseDir: workDir })
     const outFile = join(workDir, 'output.txt')
+    // Shell-free contract: the command is parsed into argv and spawned
+    // directly, so the file is written by node itself, not a redirection.
     const plan = makePlan([
       {
         order: 1,
         action: StepAction.RunCommand,
-        description: 'Create file via echo',
-        content: `echo "hello" > ${outFile}`,
+        description: 'Create file via node',
+        content: `node -e "require('fs').writeFileSync(process.argv[1], 'hello')" "${outFile}"`,
         target: workDir,
       },
     ])
@@ -368,6 +370,26 @@ describe('Executor actions — RunCommand', () => {
     expect(result.stepsCompleted).toBe(1)
     expect(result.errors).toHaveLength(0)
     expect(existsSync(outFile)).toBe(true)
+  })
+
+  it('refuses shell operators instead of spawning a shell', () => {
+    const executor = createExecutor({ autonomyLevel: 3, configBaseDir: workDir })
+    const outFile = join(workDir, 'never-created.txt')
+    const plan = makePlan([
+      {
+        order: 1,
+        action: StepAction.RunCommand,
+        description: 'Redirection needs a shell',
+        content: `echo hello > ${outFile}`,
+        target: workDir,
+      },
+    ])
+
+    const result = executor.execute(plan, GATED_SUGGESTION)
+
+    expect(result.success).toBe(false)
+    expect(result.errors[0]).toContain('no shell is spawned')
+    expect(existsSync(outFile)).toBe(false)
   })
 
   it('blocks sudo commands', () => {
