@@ -26,8 +26,10 @@
  *     same issue and skips instead of opening a competing `Closes #N` PR.
  *   - The remote's default branch is NEVER pushed: only `scns/auto/*`
  *     branches are eligible, pushed by exact name, never with --force.
- *   - Dev-default-ON (AGENTS.md §9): the CLI enables this unless
- *     `BROKER_PUBLISH_GATE_PASS=0`.
+ *   - Opt-in (#53): OFF by default like every unattended writer. The CLI
+ *     enables it only via `BROKER_PUBLISH_GATE_PASS=1` (or the family
+ *     switch `SCNS_UNATTENDED=1`); unrecognized values fail closed — see
+ *     `src/shared/unattended.ts`.
  *
  * Commands are run through an injectable execFile-style runner (array
  * args, no shell) — the same pattern as `fetchGithubIssueSignals`' `gh`
@@ -419,10 +421,12 @@ export function createGatePassPublisher(deps: GatePassPublisherDeps): GatePassPu
     )
     log.info(
       { projectRoot: deps.projectRoot },
-      'gate-pass publisher started (default ON; disable with BROKER_PUBLISH_GATE_PASS=0)',
+      'gate-pass publisher started (opt-in, enabled via BROKER_PUBLISH_GATE_PASS/SCNS_UNATTENDED)',
     )
   } else {
-    log.info('gate-pass publisher NOT started (BROKER_PUBLISH_GATE_PASS=0)')
+    log.info(
+      'gate-pass publisher NOT started (opt-in, default OFF; set BROKER_PUBLISH_GATE_PASS=1 to enable)',
+    )
   }
 
   return {

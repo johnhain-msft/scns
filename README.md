@@ -351,6 +351,11 @@ You do not have to take this on faith. `doctor` reports the posture directly:
 
 If you enable any of them, that line turns into a `[WARN]` naming exactly which ones.
 
+If you do opt in, the design for keeping a self-improving install's artifacts off the
+public upstream — a private home repository per install, updates merging down, deliberate
+human contributions going up — is in
+[docs/plans/public-private-split.md](docs/plans/public-private-split.md).
+
 Two more things:
 
 - **Observers are off by default.** Nothing watches your terminal or files until you turn

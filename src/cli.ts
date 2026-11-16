@@ -2761,18 +2761,43 @@ program
       // refuses to ingest rather than acting on a repo nobody chose (the old
       // hardcoded default pointed at the public upstream repo, which is wrong
       // for every install except the maintainer's own).
+      // #63: the singleton's target may come from the meta registry's reserved
+      // `global` row instead of env — precedence env > registry > refuse. A
+      // child never reads the global row: its own row already reached it as
+      // SCNS_SELF_ISSUE_REPO via the meta-supervisor spawn.
+      let registryRepo: string | null = null
+      const isMetaChild = (process.env['SCNS_INSTANCE_ID'] ?? '').trim() !== ''
+      if (!isMetaChild && (process.env['SCNS_SELF_ISSUE_REPO'] ?? '').trim() === '') {
+        const { readRegistryTargets } = await import('./cli/meta-supervision.js')
+        const { GLOBAL_BROKER_ID } = await import('./meta-broker/registry.js')
+        const metaDbPath = join(resolveScnsHome(), '.scns', 'meta-broker.db')
+        registryRepo =
+          readRegistryTargets(metaDbPath)?.find((r) => r.projectId === GLOBAL_BROKER_ID)
+            ?.writeTargetRepo ?? null
+      }
       const repoResolution = resolveSelfIssueRepo({
         explicitRepo: process.env['SCNS_SELF_ISSUE_REPO'],
         instanceId: process.env['SCNS_INSTANCE_ID'],
+        registryRepo,
       })
       if (repoResolution.kind === 'unconfigured') {
         selfIssueLog.error(
           'self-issue ingestion has no target repo and will refuse to run: set ' +
-            'SCNS_SELF_ISSUE_REPO=owner/name to the repository this install may ' +
+            'SCNS_SELF_ISSUE_REPO=owner/name (or the registry target graph via ' +
+            "the meta registry's global row) to the repository this install may " +
             'ingest issues from — a repo the authenticated gh account owns (#58)',
         )
       }
-      const repo = repoResolution.kind === 'explicit' ? repoResolution.repo : undefined
+      if (repoResolution.kind === 'registry') {
+        selfIssueLog.info(
+          { repo: repoResolution.repo },
+          'self-issue target resolved from the meta registry global row (#63)',
+        )
+      }
+      const repo =
+        repoResolution.kind === 'explicit' || repoResolution.kind === 'registry'
+          ? repoResolution.repo
+          : undefined
       const labelAllowlist = (process.env['SCNS_SELF_ISSUE_LABELS'] ?? '')
         .split(',')
         .map((s) => s.trim())
@@ -5989,7 +6014,13 @@ meta
   )
   .option(
     '--issue-repo <owner/name>',
-    "GitHub repo for the child's self-issue-ingest (default: auto-derived from the project's origin remote)",
+    "the one repo this child's writers may act on — its write target, which is also " +
+      "the self-issue-ingest source (default: auto-derived from the project's origin remote)",
+  )
+  .option(
+    '--upstream-repo <owner/name>',
+    'where this project merges updates down from; fetch-only, never a write target ' +
+      '(#63; default: none — a project is its own upstream)',
   )
   .option(
     '--meta-db <path>',
@@ -6004,6 +6035,7 @@ meta
         autonomy?: number
         threshold?: number
         issueRepo?: string
+        upstreamRepo?: string
         metaDb: string
       },
     ) => {
@@ -6013,10 +6045,12 @@ meta
       const { deriveProjectId } = await import('./broker/project-identity.js')
       const { deriveSelfIssueRepoFromGit } = await import('./brain/self-issue-source.js')
       const root = resolve(projectRoot.replace(/^~(?=\/|$)/, homedir()))
-      // Track-2: each child ingests its OWN repo's issues. Prefer an explicit
+      // Track-2: each child acts on its OWN repo. Prefer an explicit
       // --issue-repo; otherwise auto-derive owner/name from the project's origin
       // remote (null when it has no GitHub remote → the child ingests nothing).
-      const selfIssueRepo = opts.issueRepo ?? (await deriveSelfIssueRepoFromGit(root))
+      // #63: the value lands in write_target_repo; self_issue_repo stays the
+      // legacy read-side alias.
+      const writeTargetRepo = opts.issueRepo ?? (await deriveSelfIssueRepoFromGit(root))
       mkdirSync(dirname(opts.metaDb), { recursive: true })
       const db = new Database(opts.metaDb)
       try {
@@ -6028,7 +6062,8 @@ meta
           desiredPort: opts.port ?? null,
           autonomyLevel: opts.autonomy ?? null,
           autoApproveThreshold: opts.threshold ?? null,
-          selfIssueRepo,
+          writeTargetRepo,
+          upstreamRepo: opts.upstreamRepo ?? null,
         })
         const proj = getProject(db, projectId)!
         console.log(JSON.stringify(proj, null, 2))
@@ -6040,7 +6075,7 @@ meta
 
 meta
   .command('list')
-  .description('List all registered projects + live state')
+  .description('List all registered projects + live state, and the target graph (#63)')
   .option(
     '--meta-db <path>',
     'meta-broker registry DB path',
@@ -6049,6 +6084,7 @@ meta
   .action(async (opts: { metaDb: string }) => {
     const { default: Database } = await import('better-sqlite3')
     const { applyMetaSchema, listProjects } = await import('./meta-broker/registry.js')
+    const { readRegistryTargets, formatTargetGraph } = await import('./cli/meta-supervision.js')
     if (!existsSync(opts.metaDb)) {
       console.log(JSON.stringify({ projects: [] }, null, 2))
       return
@@ -6059,6 +6095,16 @@ meta
       console.log(JSON.stringify({ projects: listProjects(db) }, null, 2))
     } finally {
       db.close()
+    }
+    // #63 — each broker's `upstream -> write target`, the reserved global
+    // row included, so the whole graph is inspectable in one place.
+    const targets = readRegistryTargets(opts.metaDb)
+    if (targets !== null) {
+      console.log('')
+      console.log('target graph (upstream -> write target):')
+      for (const line of formatTargetGraph(targets)) {
+        console.log(`  ${line}`)
+      }
     }
   })
 

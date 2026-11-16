@@ -285,12 +285,17 @@ async function defaultGitOriginUrl(root: string): Promise<string> {
  * - `explicit`       — a non-blank `SCNS_SELF_ISSUE_REPO` names the repo.
  * - `project-origin` — a meta-CHILD broker with no explicit repo lets `gh`
  *                      derive the repo from ITS OWN project's origin remote.
- * - `unconfigured`   — the singleton with no explicit repo. The caller must
- *                      REFUSE to ingest: a target nobody chose is not a target.
+ * - `registry`       — #63: the singleton with no explicit repo takes the
+ *                      write target declared on the meta registry's reserved
+ *                      `global` row.
+ * - `unconfigured`   — the singleton with no explicit repo and no registry
+ *                      row. The caller must REFUSE to ingest: a target nobody
+ *                      chose is not a target.
  */
 export type SelfIssueRepoResolution =
   | { readonly kind: 'explicit'; readonly repo: string }
   | { readonly kind: 'project-origin' }
+  | { readonly kind: 'registry'; readonly repo: string }
   | { readonly kind: 'unconfigured' }
 
 /**
@@ -299,8 +304,11 @@ export type SelfIssueRepoResolution =
  * - Otherwise a meta-CHILD broker (identified by `SCNS_INSTANCE_ID`, which is set
  *   ONLY by the meta-supervisor child spawn) derives the repo from its own
  *   project's origin remote — it must NOT fall back to any SCNS default, which
- *   would ingest SCNS's issues into another project's broker.
- * - The singleton (no instanceId) with no explicit repo is `unconfigured` and
+ *   would ingest SCNS's issues into another project's broker. The child's own
+ *   registry row already reached it as `SCNS_SELF_ISSUE_REPO`, so `registryRepo`
+ *   (the GLOBAL row's write target) is deliberately ignored for children.
+ * - The singleton (no instanceId) falls back to the registry's `global` row
+ *   (#63: env > registry > refuse), and with neither is `unconfigured` —
  *   ingestion must refuse (#58). The historical hardcoded upstream default made
  *   every install that enabled self-issue ingestion read from — and, through the
  *   delivery loop, act on — the public upstream repo instead of its own.
@@ -308,9 +316,13 @@ export type SelfIssueRepoResolution =
 export function resolveSelfIssueRepo(input: {
   readonly explicitRepo?: string | null
   readonly instanceId?: string | null
+  readonly registryRepo?: string | null
 }): SelfIssueRepoResolution {
   const explicit = (input.explicitRepo ?? '').trim()
   if (explicit !== '') return { kind: 'explicit', repo: explicit }
   const isMetaChild = (input.instanceId ?? '').trim() !== ''
-  return isMetaChild ? { kind: 'project-origin' } : { kind: 'unconfigured' }
+  if (isMetaChild) return { kind: 'project-origin' }
+  const registry = (input.registryRepo ?? '').trim()
+  if (registry !== '') return { kind: 'registry', repo: registry }
+  return { kind: 'unconfigured' }
 }

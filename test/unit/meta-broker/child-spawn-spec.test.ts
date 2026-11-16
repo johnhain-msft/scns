@@ -88,6 +88,23 @@ describe('buildChildSpawnSpec', () => {
     const withRepo = buildChildSpawnSpec({ ...base, selfIssueRepo: 'example-org/Cosmere_RPG' })
     expect(withRepo.env.SCNS_SELF_ISSUE_REPO).toBe('example-org/Cosmere_RPG')
   })
+
+  // #63: write_target_repo supersedes self_issue_repo; the child still receives
+  // it through the same env variable, so the child-side resolution is unchanged.
+  it('threads writeTargetRepo as SCNS_SELF_ISSUE_REPO, winning over the legacy selfIssueRepo', () => {
+    const spec = buildChildSpawnSpec({
+      ...base,
+      writeTargetRepo: 'me/project-home',
+      selfIssueRepo: 'o/legacy',
+    })
+    expect(spec.env.SCNS_SELF_ISSUE_REPO).toBe('me/project-home')
+  })
+
+  it('omits SCNS_SELF_ISSUE_REPO when writeTargetRepo is blank and no legacy repo is set', () => {
+    expect(buildChildSpawnSpec({ ...base, writeTargetRepo: '  ' }).env.SCNS_SELF_ISSUE_REPO).toBe(
+      undefined,
+    )
+  })
 })
 
 // ── WI-6: children never killStale — the supervisor owns port assignment ──

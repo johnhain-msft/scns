@@ -140,8 +140,18 @@ export interface ChildSpawnSpecInput {
    * Track-2 — per-project GitHub `owner/name` for the child's self-issue-ingest,
    * threaded as `SCNS_SELF_ISSUE_REPO` (omitted when null/blank so the child does
    * NOT ingest the singleton's SCNS issues).
+   *
+   * #63: legacy spelling of `writeTargetRepo` — still honored when the newer
+   * field is absent.
    */
   readonly selfIssueRepo?: string | null
+  /**
+   * #63 — the one repo this child's writers may act on (`ProjectRow.
+   * writeTargetRepo`, which already carries the legacy `self_issue_repo`
+   * alias). Threaded through the SAME `SCNS_SELF_ISSUE_REPO` variable, so the
+   * child-side resolution (`resolveSelfIssueRepo`) is unchanged.
+   */
+  readonly writeTargetRepo?: string | null
 }
 
 export interface ChildSpawnSpec {
@@ -201,8 +211,11 @@ export function buildChildSpawnSpec(input: ChildSpawnSpecInput): ChildSpawnSpec 
   if (input.autoApproveThreshold != null) {
     env['SCNS_SUGGEST_AUTO_APPROVE_THRESHOLD'] = String(input.autoApproveThreshold)
   }
-  if (input.selfIssueRepo != null && input.selfIssueRepo.trim() !== '') {
-    env['SCNS_SELF_ISSUE_REPO'] = input.selfIssueRepo.trim()
+  const writeTarget = [input.writeTargetRepo, input.selfIssueRepo].find(
+    (repo) => repo != null && repo.trim() !== '',
+  )
+  if (writeTarget != null) {
+    env['SCNS_SELF_ISSUE_REPO'] = writeTarget.trim()
   }
   return { args, env }
 }
@@ -337,7 +350,7 @@ export function createMetaSupervisor(cfg: MetaSupervisorConfig): MetaSupervisor 
       instanceId,
       autonomyLevel: existing?.autonomyLevel,
       autoApproveThreshold: existing?.autoApproveThreshold,
-      selfIssueRepo: existing?.selfIssueRepo,
+      writeTargetRepo: existing?.writeTargetRepo,
     })
     // Capture the child's stdout+stderr to a per-project log so an operator can
     // diagnose it (children are detached from the supervisor's console; without
@@ -463,7 +476,7 @@ export function createMetaSupervisor(cfg: MetaSupervisorConfig): MetaSupervisor 
       instanceId,
       autonomyLevel: proj.autonomyLevel,
       autoApproveThreshold: proj.autoApproveThreshold,
-      selfIssueRepo: proj.selfIssueRepo,
+      writeTargetRepo: proj.writeTargetRepo,
     })
     const ownedChildAlive = (): boolean =>
       child !== undefined && child.proc.exitCode === null && child.proc.signalCode === null

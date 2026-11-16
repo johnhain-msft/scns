@@ -36,6 +36,7 @@ import {
   readLiveBrokerPid,
   runPidfilePath,
 } from '../broker/services/broker-pidfile.js'
+import { GLOBAL_BROKER_ID } from '../meta-broker/registry.js'
 import type { ProbeResult } from '../broker/services/external-watchdog.js'
 import {
   DEFAULT_STOP_GRACE_MS,
@@ -134,7 +135,11 @@ export function countRegisteredProjects(metaDbPath: string): number | null {
       .prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type='table' AND name='projects'")
       .get() as { n: number } | undefined
     if (!table || table.n === 0) return 0
-    const count = db.prepare('SELECT COUNT(*) AS n FROM projects').get() as { n: number }
+    // The reserved global row (#63) is target-graph configuration, not a
+    // child — a registry holding only it has nothing to supervise.
+    const count = db
+      .prepare('SELECT COUNT(*) AS n FROM projects WHERE project_id != ?')
+      .get(GLOBAL_BROKER_ID) as { n: number }
     return count.n
   } catch {
     return null
@@ -145,6 +150,93 @@ export function countRegisteredProjects(metaDbPath: string): number | null {
       /* already closed */
     }
   }
+}
+
+// ---------------------------------------------------------------------------
+// #63 — the registry's target graph, read the hardened way
+// ---------------------------------------------------------------------------
+
+/** One broker's declared repos, with the legacy alias already applied. */
+export interface RegistryTargetRow {
+  readonly projectId: string
+  readonly projectRoot: string
+  /** Where updates come from; fetch-only. Null for an ordinary project. */
+  readonly upstreamRepo: string | null
+  /** Effective write target: `write_target_repo`, else legacy `self_issue_repo`. */
+  readonly writeTargetRepo: string | null
+}
+
+function nonBlank(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() !== '' ? value : null
+}
+
+/**
+ * Every registry row's target graph — the reserved `global` row included —
+ * without letting a bad registry break the caller (`scns doctor`, the
+ * singleton's self-issue startup). Same contract as `countRegisteredProjects`:
+ * null for missing/unreadable/non-SQLite, read-only, never throws. Tolerates
+ * a pre-#63 registry where the new columns do not exist yet.
+ */
+export function readRegistryTargets(metaDbPath: string): ReadonlyArray<RegistryTargetRow> | null {
+  if (!existsSync(metaDbPath)) return null
+  let db: Database.Database
+  try {
+    db = new DatabaseCtor(metaDbPath, { readonly: true, fileMustExist: true })
+  } catch {
+    return null
+  }
+  try {
+    const table = db
+      .prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type='table' AND name='projects'")
+      .get() as { n: number } | undefined
+    if (!table || table.n === 0) return []
+    const rows = db
+      .prepare('SELECT * FROM projects ORDER BY created_at ASC, project_id ASC')
+      .all() as Array<Record<string, unknown>>
+    return rows.map((r) => ({
+      projectId: String(r['project_id']),
+      projectRoot: typeof r['project_root'] === 'string' ? r['project_root'] : '',
+      upstreamRepo: nonBlank(r['upstream_repo']),
+      writeTargetRepo: nonBlank(r['write_target_repo']) ?? nonBlank(r['self_issue_repo']),
+    }))
+  } catch {
+    return null
+  } finally {
+    try {
+      db.close()
+    } catch {
+      /* already closed */
+    }
+  }
+}
+
+/**
+ * `scns meta-broker list` prints each broker's `upstream -> write target`
+ * alongside its JSON. One line per broker, global first. Honest placeholders:
+ * a project is its own upstream, and an unset write target is what makes a
+ * writer refuse (#58).
+ */
+export function formatTargetGraph(rows: ReadonlyArray<RegistryTargetRow>): string[] {
+  const global = rows.find((r) => r.projectId === GLOBAL_BROKER_ID)
+  const lines: string[] = []
+  if (global === undefined) {
+    lines.push('global: (not configured — no reserved registry row; env SCNS_SELF_ISSUE_REPO only)')
+  } else {
+    lines.push(
+      `global: ${global.upstreamRepo ?? '(no upstream)'} -> ${
+        global.writeTargetRepo ?? '(write target unset — unattended writers refuse)'
+      }`,
+    )
+  }
+  for (const row of rows) {
+    if (row.projectId === GLOBAL_BROKER_ID) continue
+    lines.push(
+      `${row.projectId}: ${row.upstreamRepo ?? '(project is its own upstream)'} -> ${
+        row.writeTargetRepo ?? '(write target unset — self-issue ingest off)'
+      }`,
+    )
+  }
+  return lines
 }
 
 // ---------------------------------------------------------------------------

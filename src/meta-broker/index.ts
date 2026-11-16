@@ -11,19 +11,19 @@ export {
   updateChildState,
   recordHealthFailure,
   resetHealthFailures,
+  setGlobalTargets,
+  getGlobalTargets,
+  GLOBAL_BROKER_ID,
 } from './registry.js'
 export type {
   ProjectRow,
   RegisterProjectInput,
   ProjectChildState,
   ProjectStatus,
+  GlobalTargets,
 } from './registry.js'
 
-export {
-  allocatePort,
-  DEFAULT_PORT_POOL_START,
-  DEFAULT_PORT_POOL_SIZE,
-} from './port-allocator.js'
+export { allocatePort, DEFAULT_PORT_POOL_START, DEFAULT_PORT_POOL_SIZE } from './port-allocator.js'
 export type { AllocatePortInput } from './port-allocator.js'
 
 export { shouldRestart } from './restart-policy.js'
