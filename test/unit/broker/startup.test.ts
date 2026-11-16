@@ -308,7 +308,12 @@ const mockShutdownInstance = {
 }
 
 vi.mock('../../../src/broker/shutdown.js', () => ({
-  ShutdownManager: vi.fn(() => mockShutdownInstance),
+  // A function expression, not an arrow: production code calls
+  // `new ShutdownManager()`, and vitest 4 forwards construction to the mock
+  // implementation — which must therefore be constructible.
+  ShutdownManager: vi.fn(function () {
+    return mockShutdownInstance
+  }),
 }))
 
 // ── Imports (after mocks) ────────────────────────────────────
