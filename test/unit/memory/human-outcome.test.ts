@@ -1,13 +1,17 @@
 import { describe, it, expect } from 'vitest'
 import {
   HUMAN_OUTCOME_GRADIENT,
+  humanOutcomeOfCue,
   humanOutcomeOfVerdict,
+  settleHumanOutcomeForAttempt,
   settleHumanOutcomeForEntity,
 } from '../../../src/memory/human-outcome.js'
 import {
   openExperienceStore,
   logRetrievalExperience,
+  settleHumanOutcome,
 } from '../../../src/memory/experience-store.js'
+import { loadRewardRows } from '../../../src/reward/kto-learner.js'
 
 // ── Phase D — the human accept-vs-waste signal on the SAME 6-pt gradient as the App-C.3 judge
 // (1.0/0.8/0.6/0.4/0.2/0.0), so human and judge outcomes are directly comparable rows in the
@@ -106,16 +110,8 @@ describe('settleHumanOutcomeForEntity — delayed, bounded, auditable credit ass
 })
 
 // ── T022/T025 [US2] (specs/001-learning-memory-loop) — per-attempt binding + implicit cues ───────
-import {
-  openExperienceStore,
-  logRetrievalExperience,
-  settleHumanOutcome,
-} from '../../../src/memory/experience-store.js'
-import { loadRewardRows } from '../../../src/reward/kto-learner.js'
-import {
-  humanOutcomeOfCue,
-  settleHumanOutcomeForAttempt,
-} from '../../../src/memory/human-outcome.js'
+// (imports for this section live at the top of the file — ESM hoists them
+// anyway, and vitest 4's transform rejects the duplicate declarations)
 
 describe('T022 — the human verdict binds to the EXACT attempt id (0% topic-only)', () => {
   it('settling one attempt leaves a same-topic sibling untouched (the collision trap)', () => {
