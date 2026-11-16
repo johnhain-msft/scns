@@ -17,13 +17,13 @@ const observationTypeValues = Object.values(ObservationType) as [string, ...stri
 
 /** Zod schema for a single observation event */
 export const ObservationSchema = z.object({
-  id: z.string().uuid(),
+  id: z.guid(),
   type: z.enum(observationTypeValues) as z.ZodType<ObservationType>,
   timestamp: z.string().datetime(),
   source: z.string(),
   content: z.string(),
   tags: z.array(z.string()),
-  metadata: z.record(z.unknown()).optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
 })
 
 export type Observation = z.infer<typeof ObservationSchema>

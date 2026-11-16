@@ -28,7 +28,7 @@ const ChronicleEntrySchema = z.object({
   timestamp: z.string(),
   type: z.enum(['session-start', 'session-end', 'summary', 'instruction-suggestion']),
   content: z.string(),
-  metadata: z.record(z.unknown()).optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
 })
 
 /** Cursor tracks last-read position per file */

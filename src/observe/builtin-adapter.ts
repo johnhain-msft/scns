@@ -55,7 +55,7 @@ export function createBuiltinAdapter(observer: Observer, options?: AdapterOption
     },
 
     getConfigSchema(): z.ZodType {
-      return z.record(z.unknown())
+      return z.record(z.string(), z.unknown())
     },
 
     async healthCheck(): Promise<ObserverHealth> {
