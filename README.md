@@ -1,7 +1,5 @@
 # SCNS — Second Central Nervous System
 
-[![M8ven Verified](https://m8ven.ai/badge/mcp/johnhain-msft-scns-epeolq?variant=verified&v=ffba5a7717a76c039dff58507d4bc7dd)](https://m8ven.ai/mcp/johnhain-msft-scns-epeolq?s=readme)
-
 **SCNS gives your coding agent a memory that survives the session.**
 
 Every time you close a Copilot CLI session, everything it learned about your project
