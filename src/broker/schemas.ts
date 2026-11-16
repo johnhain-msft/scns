@@ -105,7 +105,7 @@ export const SessionHookEventSchema = z.object({
   sessionId: z.string().max(256).optional(),
   tool: z.string().max(256).optional(),
   timestamp: z.string().min(1, 'timestamp is required').max(64),
-  metadata: z.record(z.unknown()).optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
   model: z.string().max(128).optional(),
   toolArgs: z.string().max(65536).optional(),
   toolResult: z.string().max(65536).optional(),

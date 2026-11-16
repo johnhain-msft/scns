@@ -24,20 +24,20 @@ const SessionStorePollerConfigSchema = z.object({
 
 /** Full observation configuration schema */
 export const ObservationConfigSchema = z.object({
-  privacy: PrivacyConfigSchema.default({}),
-  activeApp: ObserverConfigSchema.default({ enabled: true, intervalMs: 30_000 }),
-  fileChanges: ObserverConfigSchema.default({ enabled: true }),
-  gitActivity: ObserverConfigSchema.default({ enabled: true, intervalMs: 300_000 }),
-  terminalHistory: ObserverConfigSchema.default({
+  privacy: PrivacyConfigSchema.prefault({}),
+  activeApp: ObserverConfigSchema.prefault({ enabled: true, intervalMs: 30_000 }),
+  fileChanges: ObserverConfigSchema.prefault({ enabled: true }),
+  gitActivity: ObserverConfigSchema.prefault({ enabled: true, intervalMs: 300_000 }),
+  terminalHistory: ObserverConfigSchema.prefault({
     enabled: false,
     intervalMs: 60_000,
     optIn: false,
   }),
-  browserTabs: ObserverConfigSchema.default({ enabled: false, intervalMs: 60_000, optIn: false }),
-  sessionHooks: ObserverConfigSchema.default({ enabled: true }),
-  configChanges: ObserverConfigSchema.default({ enabled: true }),
-  chronicle: ChronicleObserverConfigSchema.default({ enabled: false }),
-  sessionStorePoller: SessionStorePollerConfigSchema.default({ enabled: true }),
+  browserTabs: ObserverConfigSchema.prefault({ enabled: false, intervalMs: 60_000, optIn: false }),
+  sessionHooks: ObserverConfigSchema.prefault({ enabled: true }),
+  configChanges: ObserverConfigSchema.prefault({ enabled: true }),
+  chronicle: ChronicleObserverConfigSchema.prefault({ enabled: false }),
+  sessionStorePoller: SessionStorePollerConfigSchema.prefault({ enabled: true }),
 })
 
 export type ObservationConfig = z.infer<typeof ObservationConfigSchema>

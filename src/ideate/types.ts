@@ -63,10 +63,7 @@ export const IdeationStatus = {
 
 export type IdeationStatus = (typeof IdeationStatus)[keyof typeof IdeationStatus]
 
-const ideationStatusValues = Object.values(IdeationStatus) as [
-  IdeationStatus,
-  ...IdeationStatus[],
-]
+const ideationStatusValues = Object.values(IdeationStatus) as [IdeationStatus, ...IdeationStatus[]]
 
 /**
  * D2 feedback hook — the realized outcome of a proposal. Absent (`null`) in D1;
@@ -82,7 +79,7 @@ export type IdeationOutcome = z.infer<typeof IdeationOutcomeSchema>
 
 /** A proposal as persisted in the inbox. */
 export const IdeationRecordSchema = IdeationProposalSchema.extend({
-  id: z.string().uuid(),
+  id: z.guid(),
   createdAt: z.string().datetime(),
   /**
    * Provenance: 'llm-ideation' (real ACP backend) or 'synth-ideation' (the
