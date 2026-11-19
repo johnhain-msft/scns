@@ -230,26 +230,32 @@ describe('createTaskScheduler', () => {
     })
 
     it('does NOT catch-up daily task after unrelated short sleep', async () => {
-      // dream-consolidation: "0 3 * * *" (daily at 3AM)
-      // Sleep from noon to 12:10 — dream was NOT missed
-      const yesterday3am = new Date()
-      yesterday3am.setDate(yesterday3am.getDate() - 1)
-      yesterday3am.setHours(3, 0, 0, 0)
+      // A daily cron pinned ~12h away from "now" (the cold-start describe's technique), so the
+      // 10-minute sleep window below can never contain the daily fire time. The original
+      // hard-coded "0 3 * * *" turned this test into a guaranteed failure every day between
+      // 03:00 and 03:10 runner time: the simulated sleep [now-10m, now] genuinely contained
+      // today's 03:00, so the scheduler CORRECTLY caught up and the assertion was wrong —
+      // which is exactly how the 2026-11-19 03:06 UTC push to main went red on all five nodes.
+      const awayHour = (new Date().getHours() + 12) % 24
+      const yesterdayAway = new Date()
+      yesterdayAway.setDate(yesterdayAway.getDate() - 1)
+      yesterdayAway.setHours(awayHour, 0, 0, 0)
 
-      const tasks = [makeTask('dream-consolidation', '0 3 * * *', yesterday3am.toISOString())]
+      const tasks = [
+        makeTask('dream-consolidation', `0 ${awayHour} * * *`, yesterdayAway.toISOString()),
+      ]
       const db = makeMockDb(tasks)
       const handlerFn = vi.fn(async () => {})
       handlers.set('dream-consolidation', handlerFn)
 
       scheduler = createTaskScheduler(db as any, handlers, { intervalMs: 60_000 })
 
-      // Simulate 10-minute noon sleep (no 3AM in window)
+      // Simulate a 10-minute sleep; the daily fire time is ~12h away, outside any such window
       const tenMinAgo = Date.now() - 10 * 60_000
       ;(scheduler as any).setLastTickTime(tenMinAgo)
       await scheduler.tick()
 
       // Dream should NOT have been called via catch-up
-      // (it might match if current time happens to be 3AM, but not via catch-up)
       const catchUpCalls = mockLogChild.info.mock.calls.filter(
         (c: any[]) => c[0]?.catchUp === true && c[0]?.taskId === 'dream-consolidation',
       )
