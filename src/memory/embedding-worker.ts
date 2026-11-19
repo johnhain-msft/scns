@@ -13,8 +13,8 @@
  * `runWorkerMain` entry wires the real fastembed batcher and `process` IPC.
  */
 
+import { realpathSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { pathToFileURL } from 'node:url'
 import { type WorkerInbound, type WorkerOutbound } from './embedding-protocol.js'
 
 export interface WorkerLoopDeps {
@@ -189,15 +189,32 @@ export async function runWorkerMain(): Promise<void> {
   process.on('disconnect', () => process.exit(0))
 }
 
-/** True when this module is the process entry point (the spawned worker child). */
-function isMainEntry(): boolean {
-  const entry = process.argv[1]
-  if (!entry) return false
+/**
+ * True when `argvEntry` names the same file as this module (`selfUrl`).
+ *
+ * Compares REALPATHS, not raw strings: Node's ESM loader resolves
+ * `import.meta.url` to the realpath of the module, while `process.argv[1]`
+ * is the spawn path as given. Any symlinked component — the macOS tmpdir
+ * (`/var` -> `/private/var`, so every quality-gate worktree), a symlinked
+ * checkout or node_modules — made the raw comparison fail, so the spawned
+ * worker concluded it was not the entry point, skipped `runWorkerMain()`,
+ * and exited 0 without signalling ready (issue #78).
+ *
+ * Unresolvable paths stay fail-closed: a parent importing this module must
+ * never accidentally run the worker loop.
+ */
+export function entryIsThisModule(selfUrl: string, argvEntry: string | undefined): boolean {
+  if (!argvEntry) return false
   try {
-    return import.meta.url === pathToFileURL(entry).href
+    return realpathSync(fileURLToPath(selfUrl)) === realpathSync(argvEntry)
   } catch {
     return false
   }
+}
+
+/** True when this module is the process entry point (the spawned worker child). */
+function isMainEntry(): boolean {
+  return entryIsThisModule(import.meta.url, process.argv[1])
 }
 
 if (isMainEntry()) {
