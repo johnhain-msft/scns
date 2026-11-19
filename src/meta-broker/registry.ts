@@ -281,8 +281,7 @@ export function getGlobalTargets(db: Database.Database): GlobalTargets | null {
 
 export function getProject(db: Database.Database, projectId: string): ProjectRow | null {
   const row = db.prepare('SELECT * FROM projects WHERE project_id = ?').get(projectId) as
-    | RawRow
-    | undefined
+    RawRow | undefined
   return row ? rowToProject(row) : null
 }
 

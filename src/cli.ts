@@ -355,11 +355,9 @@ program
     const ideateMemoryHolder: { db: import('better-sqlite3').Database | null } = { db: null }
     const ideateMemoryEnabled = process.env['SCNS_IDEATE_MEMORY'] === '1'
     let selfImprovementMemory:
-      | import('./suggest/generator.js').GeneratorDeps['selfImprovementMemory']
-      | undefined
+      import('./suggest/generator.js').GeneratorDeps['selfImprovementMemory'] | undefined
     let recordSuggestionOutcomeFn:
-      | typeof import('./suggest/outcome-writer.js').recordSuggestionOutcome
-      | undefined
+      typeof import('./suggest/outcome-writer.js').recordSuggestionOutcome | undefined
     if (ideateMemoryEnabled) {
       const { entityNeighborhood: ideateNeighborhood } =
         await import('./memory/entities/neighborhood.js')
@@ -3201,8 +3199,7 @@ program
               const schedule = patterns['schedule'] as Record<string, unknown> | undefined
               if (schedule) {
                 const activeHours = schedule['activeHours'] as
-                  | Array<{ hour: number; sessionCount: number }>
-                  | undefined
+                  Array<{ hour: number; sessionCount: number }> | undefined
                 if (activeHours && activeHours.length > 0) {
                   const topHours = activeHours.slice(0, 3)
                   console.log(
