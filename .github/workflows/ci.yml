@@ -36,6 +36,16 @@ concurrency:
 permissions:
   contents: read
 
+# onnxruntime-node's install script downloads the CUDA EP binaries on Linux by
+# default. Upstream deleted the v1.21.0 linux-x64-gpu release asset on
+# 2026-11-18, turning every `npm ci` on these runners into a 404. The runners
+# have no GPU and the CUDA EP was never used here, so pin the skip the
+# installer documents — an upstream asset deletion must not take the gate
+# down (same failure class as the fastembed GCS bucket death, 2026-10).
+# Asserted by test/unit/ci/ci-workflow.test.ts.
+env:
+  npm_config_onnxruntime_node_install_cuda: skip
+
 jobs:
   quality:
     name: lint · format · types
