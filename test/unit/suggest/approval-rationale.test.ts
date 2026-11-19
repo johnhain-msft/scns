@@ -18,7 +18,10 @@ import { recordWeeklyVerdict } from '../../../src/suggest/weekly-session.js'
 import { recordSuggestionOutcome } from '../../../src/suggest/outcome-writer.js'
 import { createReviewWorkflow } from '../../../src/suggest/review.js'
 import { isHumanReason } from '../../../src/suggest/review-reason.js'
-import { readDecisionRationales, ingestDecisionRationales } from '../../../src/memory/decision-rationale.js'
+import {
+  readDecisionRationales,
+  ingestDecisionRationales,
+} from '../../../src/memory/decision-rationale.js'
 import { createVault } from '../../../src/memory/vault.js'
 import { openMemoryDb, closeMemoryDb } from '../../../src/memory/db.js'
 import { SuggestionType, type Suggestion } from '../../../src/suggest/types.js'
@@ -356,25 +359,34 @@ describe('"all of my responses" — the explain seam', () => {
     const id = randomUUID()
     store.save(sugg(id))
 
-    // Week 1: he cannot judge it, and says why.
+    // Week 1: he cannot judge it, and says why. The clock is pinned a week apart (issue #59):
+    // on the real clock both verdicts can land in the SAME MILLISECOND, where `recorded_at`
+    // ties and the filename tiebreak sorts by verdict name ('approve' < 'explain'),
+    // inverting the chronology this test asserts.
     recordWeeklyVerdict(
       store,
       id,
-      { verdict: 'explain', code: null, text: 'I cannot tell if this touches the broker or the CLI' },
-      deps(),
+      {
+        verdict: 'explain',
+        code: null,
+        text: 'I cannot tell if this touches the broker or the CLI',
+      },
+      { ...deps(), now: () => new Date('2026-01-05T09:00:00.000Z') },
     )
     // Week 2: the proposal is rewritten and he approves it.
-    recordWeeklyVerdict(store, id, { verdict: 'approve', code: 'unblocks', text: 'clearer now' }, deps())
+    recordWeeklyVerdict(
+      store,
+      id,
+      { verdict: 'approve', code: 'unblocks', text: 'clearer now' },
+      { ...deps(), now: () => new Date('2026-01-12T09:00:00.000Z') },
+    )
 
     // The slot legitimately holds the latest verdict...
     expect(store.get(id)!.reviewReason).toContain('clearer now')
     expect(store.get(id)!.reviewReason).not.toContain('broker or the CLI')
     // ...and BOTH responses survive in the corpus, in order.
     const texts = vaultRationalesFor(id)
-    expect(texts).toEqual([
-      'I cannot tell if this touches the broker or the CLI',
-      'clearer now',
-    ])
+    expect(texts).toEqual(['I cannot tell if this touches the broker or the CLI', 'clearer now'])
   })
 
   it('files an explanation under its own verdict, never as an approval or a rejection', () => {
@@ -384,12 +396,19 @@ describe('"all of my responses" — the explain seam', () => {
     const id = randomUUID()
     store.save(sugg(id))
 
-    recordWeeklyVerdict(store, id, { verdict: 'explain', code: null, text: 'what does this touch?' }, deps())
+    recordWeeklyVerdict(
+      store,
+      id,
+      { verdict: 'explain', code: null, text: 'what does this touch?' },
+      deps(),
+    )
 
     const rows = readDecisionRationales(db, { suggestionId: id })
     expect(rows).toHaveLength(1)
     expect(rows[0]!.reviewVerdict).toBe('explain')
-    expect(rows.some((r) => r.reviewVerdict === 'approve' || r.reviewVerdict === 'reject')).toBe(false)
+    expect(rows.some((r) => r.reviewVerdict === 'approve' || r.reviewVerdict === 'reject')).toBe(
+      false,
+    )
     // And it is still pending — capture must not have moved the status.
     expect(store.get(id)!.status).toBe('pending')
   })
