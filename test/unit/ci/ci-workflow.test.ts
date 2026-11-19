@@ -224,8 +224,7 @@ describe('ci.yml — the test job', () => {
 
   it('does not fail-fast, so one bad Node major does not hide the others', () => {
     const strategy = loadWorkflow(CI_WORKFLOW).jobs?.test?.strategy as
-      | { 'fail-fast'?: unknown }
-      | undefined
+      { 'fail-fast'?: unknown } | undefined
 
     expect(strategy?.['fail-fast']).toBe(false)
   })
@@ -338,5 +337,21 @@ describe('every workflow — reproducible, cached, pinned', () => {
     for (const step of setupNode) {
       expect(step.with?.cache).toBe('npm')
     }
+  })
+})
+
+describe('ci.yml — onnxruntime-node install stays CPU-only', () => {
+  // 2026-11-18: upstream deleted the onnxruntime-linux-x64-gpu-1.21.0.tgz
+  // release asset, so onnxruntime-node's install script — which downloads the
+  // CUDA EP binaries on Linux by default — 404s and every `npm ci` on an
+  // ubuntu runner dies. The runners have no GPU; the CUDA EP was never used
+  // in CI. The workflow must pin the documented skip so an upstream asset
+  // deletion can never take the gate down again (same failure class as the
+  // fastembed GCS bucket death, 2026-10).
+  it('pins npm_config_onnxruntime_node_install_cuda=skip at the workflow level', () => {
+    const wf = load(readFileSync(CI_WORKFLOW, 'utf8')) as Workflow & {
+      readonly env?: Record<string, unknown>
+    }
+    expect(wf.env?.['npm_config_onnxruntime_node_install_cuda']).toBe('skip')
   })
 })
