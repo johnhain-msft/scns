@@ -13,7 +13,7 @@ export const JsonRpcVersion = '2.0' as const
 export const JsonRpcRequestSchema = z.object({
   jsonrpc: z.literal('2.0'),
   method: z.string().min(1),
-  params: z.union([z.record(z.unknown()), z.array(z.unknown())]).optional(),
+  params: z.union([z.record(z.string(), z.unknown()), z.array(z.unknown())]).optional(),
   id: z.union([z.string(), z.number()]),
 })
 export type JsonRpcRequest = z.infer<typeof JsonRpcRequestSchema>
@@ -39,7 +39,7 @@ export type JsonRpcError = z.infer<typeof JsonRpcErrorSchema>
 export const JsonRpcNotificationSchema = z.object({
   jsonrpc: z.literal('2.0'),
   method: z.string().min(1),
-  params: z.union([z.record(z.unknown()), z.array(z.unknown())]).optional(),
+  params: z.union([z.record(z.string(), z.unknown()), z.array(z.unknown())]).optional(),
 })
 export type JsonRpcNotification = z.infer<typeof JsonRpcNotificationSchema>
 

@@ -5,7 +5,7 @@ import { z } from 'zod'
 // ---------------------------------------------------------------------------
 
 export const AgentCardSchema = z.object({
-  id: z.string().uuid(),
+  id: z.guid(),
   name: z.string().min(1),
   description: z.string(),
   url: z.string().url().optional(),
@@ -17,7 +17,7 @@ export const AgentCardSchema = z.object({
         id: z.string(),
         name: z.string(),
         description: z.string(),
-        inputSchema: z.record(z.unknown()).optional(),
+        inputSchema: z.record(z.string(), z.unknown()).optional(),
       }),
     )
     .default([]),
@@ -33,7 +33,7 @@ export const AgentCardSchema = z.object({
       required: z.boolean().default(false),
     })
     .default({ type: 'none', required: false }),
-  metadata: z.record(z.unknown()).optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
   registeredAt: z.string().datetime(),
   lastSeenAt: z.string().datetime(),
 })

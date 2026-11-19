@@ -135,7 +135,7 @@ export type EscalationKind = (typeof escalationKindValues)[number]
 
 /** Zod schema for a single suggestion */
 export const SuggestionSchema = z.object({
-  id: z.string().uuid(),
+  id: z.guid(),
   type: z.enum(suggestionTypeValues),
   title: z.string().min(1),
   description: z.string(),
