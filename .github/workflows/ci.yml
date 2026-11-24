@@ -89,10 +89,11 @@ jobs:
       # One bad major must not hide the state of the others.
       fail-fast: false
       matrix:
-        # Every major claimed by package.json#engines.node. Each exercises a
-        # different better-sqlite3 prebuild ABI, which is the thing that
-        # actually breaks when the range claim goes stale.
-        node-version: [20, 22, 23, 24, 25]
+        # Every major claimed by package.json#engines.node. better-sqlite3 13
+        # is N-API (one bundled prebuild per platform, no per-major ABI), so
+        # this spread now guards per-major runtime behaviour — an engines
+        # claim no job runs is a promise nothing checks.
+        node-version: [22, 23, 24, 25, 26]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

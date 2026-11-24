@@ -91,11 +91,11 @@ describe('runDoctor — healthy machine', () => {
 })
 
 describe('runDoctor — per-layer failures carry actionable hints', () => {
-  it('fails node-version below 20', async () => {
+  it('fails node-version below 22', async () => {
     const report = await run({ nodeVersion: 'v18.19.0' })
     const c = check(report, 'node-version')
     expect(c.status).toBe('fail')
-    expect(c.hint).toMatch(/20/)
+    expect(c.hint).toMatch(/22/)
     expect(report.ok).toBe(false)
   })
 
@@ -108,25 +108,28 @@ describe('runDoctor — per-layer failures carry actionable hints', () => {
 
   // The regression that motivated the ceiling: `major >= 20` green-lit the very
   // Node that breaks the native modules, then the next check failed with an ABI
-  // mismatch. Doctor must not bless a Node it cannot run on.
+  // mismatch. better-sqlite3 13 (N-API) removed the ABI hazard, but an untested
+  // major is still an unchecked claim — doctor must not bless a Node CI never ran.
   it('fails above the supported ceiling instead of green-lighting it', async () => {
-    const report = await run({ nodeVersion: 'v26.0.0' })
+    const report = await run({ nodeVersion: 'v28.0.0' })
     const c = check(report, 'node-version')
     expect(c.status).toBe('fail')
-    expect(c.detail).toContain('v26.0.0')
+    expect(c.detail).toContain('v28.0.0')
     expect(report.ok).toBe(false)
   })
 
-  // Node 21 sits *inside* the floor/ceiling but has no better-sqlite3 win32-x64
-  // prebuild (NODE_MODULE_VERSION 120 is absent from the 12.9.x matrix), so a
-  // naive `>=20 <26` range would still be a lie.
-  it('fails on a major inside the range that has no prebuild (Node 21)', async () => {
-    const c = check(await run({ nodeVersion: 'v21.7.3' }), 'node-version')
-    expect(c.status).toBe('fail')
+  // Majors earlier releases accepted but this one does not: Node 20 (EOL
+  // 2026-04, below better-sqlite3 13's `>=22` floor) and Node 21 (never
+  // supported). Dropping a major must actually drop it.
+  it('fails on majors below the floor that older releases accepted (20, 21)', async () => {
+    for (const version of ['v20.11.1', 'v21.7.3']) {
+      const c = check(await run({ nodeVersion: version }), 'node-version')
+      expect(c.status, `${version} must fail`).toBe('fail')
+    }
   })
 
   it('names a Node the user can actually switch to when it fails', async () => {
-    const c = check(await run({ nodeVersion: 'v26.0.0' }), 'node-version')
+    const c = check(await run({ nodeVersion: 'v28.0.0' }), 'node-version')
     expect(c.hint).toBeTruthy()
     const suggested = SUPPORTED_NODE_MAJORS.some((m) => c.hint?.includes(String(m)))
     expect(suggested, `hint should name a supported major: ${c.hint}`).toBe(true)
@@ -173,11 +176,13 @@ describe('runDoctor — per-layer failures carry actionable hints', () => {
   })
 
   // An ABI mismatch describes the interpreter running `scns doctor`, NOT the
-  // install. SCNS pins Node 20 for better-sqlite3 while the Copilot CLI requires
-  // Node >= 24, so on Windows `scns doctor` normally runs under the global Node
-  // and reported `1 check(s) failed` on a perfectly healthy machine — the same
-  // "looks broken to an alpha tester" trap as #54/#56. A genuinely broken binary
-  // still fails, and a stack that truly cannot load it fails `broker-reachable`.
+  // install. Historically SCNS pinned one Node major for better-sqlite3 while
+  // the Copilot CLI required another, so on Windows `scns doctor` ran under the
+  // global Node and reported `1 check(s) failed` on a perfectly healthy machine
+  // — the same "looks broken to an alpha tester" trap as #54/#56. N-API (13.x)
+  // makes mismatches rare (a leftover v12-era binary is the remaining case),
+  // but the downgrade-to-WARN stays: a genuinely broken binary still fails, and
+  // a stack that truly cannot load it fails `broker-reachable`.
   it('WARNS rather than fails when the native error is an ABI mismatch', async () => {
     const report = await run({
       nodeVersion: 'v24.15.0',
@@ -580,11 +585,11 @@ describe('supported Node range is declared consistently', () => {
     expect(SUPPORTED_NODE_RANGE).toBe(SUPPORTED_NODE_MAJORS.map((m) => `^${m}.0.0`).join(' || '))
   })
 
-  it('excludes the majors with no better-sqlite3 win32-x64 prebuild', () => {
-    for (const unsupported of [18, 19, 21, 26]) {
+  it('excludes EOL majors and majors CI does not exercise', () => {
+    for (const unsupported of [18, 19, 20, 21, 27]) {
       expect(
         SUPPORTED_NODE_MAJORS as readonly number[],
-        `Node ${unsupported} has no prebuild and must not be declared supported`,
+        `Node ${unsupported} is EOL or untested by CI and must not be declared supported`,
       ).not.toContain(unsupported)
     }
   })

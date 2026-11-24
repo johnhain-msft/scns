@@ -374,25 +374,23 @@ Windows 10/11, no WSL required. PowerShell throughout.
 
 **1. A supported Node.** This is the single biggest install trap:
 
-- SCNS depends on `better-sqlite3@~12.9`, a native module. It loads a prebuilt binary
-  matched to Node's ABI version. That line's published `win32-x64` prebuilds cover ABI
-  115, 127, 131, 137 and 141 — **Node 20, 22, 23, 24 and 25**. Node 21 (ABI 120) has no
-  prebuild and is not supported, and neither is anything newer than 25.
-- On an unsupported major, `npm ci` falls through to compiling from source, which on a
-  typical Windows machine without Visual Studio build tools fails. The failure then
-  surfaces much later as `native-modules` failing in `node dist\cli.js doctor`.
-- `package.json#engines` and `node dist\cli.js doctor` state exactly this range, and
-  doctor fails fast rather than green-lighting a Node it cannot actually run on.
+- SCNS depends on `better-sqlite3@~13.2`, a native module. The 13.x line is N-API with
+  a `win32-x64` prebuild bundled inside the npm package itself, so there is no download
+  step and no compile on install — but its `engines` requires **Node 22 or newer**, and
+  SCNS supports exactly the majors its CI tests: **Node 22, 23, 24, 25 and 26**.
+- On a major outside that set, `npm ci` warns (`EBADENGINE`) and `node dist\cli.js
+  doctor` fails fast rather than green-lighting a Node nothing has tested.
+- `package.json#engines` and `node dist\cli.js doctor` state exactly this range.
 
 ```powershell
-node --version          # must be 20.x, 22.x, 23.x, 24.x or 25.x
+node --version          # must be 22.x, 23.x, 24.x, 25.x or 26.x
 ```
 
 If yours is already in range, use it — you do not need a second Node.
 
-**The prebuild is chosen by whichever `node` runs `npm ci`.** If you keep several Node
-versions on the machine, make sure the one on `PATH` during install is the one you will
-run SCNS with; otherwise you install a binary for the wrong ABI and land in Trap 1.
+**Install with the same `node` you will run SCNS with.** The bundled N-API prebuild
+works across all supported majors, but keeping install-Node and run-Node identical
+avoids a whole class of multi-Node PATH confusion.
 
 **Do not change your system-wide Node to suit SCNS** if other tools depend on it. Install
 a supported version alongside whatever you already have (nvm-windows, Nodist, fnm) and
@@ -653,16 +651,15 @@ than claiming success.
 
 ## Critical constraint: Node version
 
-SCNS depends on better-sqlite3 `~12.9`, whose published win32-x64 prebuilds cover Node ABI
-115/127/131/137/141 — **Node 20, 22, 23, 24 and 25**. Node 21 (ABI 120) has no prebuild,
-and neither does anything newer than 25. On an unsupported major the install tries to
-compile from source and typically fails, surfacing later as `native-modules` failing in
-doctor.
+SCNS depends on better-sqlite3 `~13.2`, an N-API native module whose win32-x64 prebuild
+ships inside the npm package — no download or compile on install. Its `engines` requires
+Node >= 22, and SCNS claims exactly the majors its CI tests.
 
-- SCNS runs on **Node 20, 22, 23, 24 or 25**. `package.json#engines` and
-  `node dist/cli.js doctor` both state exactly that range.
-- The prebuild that gets installed is chosen by whichever `node` runs `npm ci` — install
-  with the same Node you will run SCNS with.
+- SCNS runs on **Node 22, 23, 24, 25 or 26**. `package.json#engines` and
+  `node dist/cli.js doctor` both state exactly that range; doctor fails fast on anything
+  else rather than green-lighting a Node nothing has tested.
+- Install with the same Node you will run SCNS with — the N-API prebuild works across
+  all supported majors, but mixing install-Node and run-Node invites PATH confusion.
 - **Do NOT change the system-wide/default Node version** if other tools depend on it.
   Install a supported version alongside it and invoke it by ABSOLUTE PATH for every SCNS
   command (npm ci, npm run build, and every `node dist/cli.js ...`).

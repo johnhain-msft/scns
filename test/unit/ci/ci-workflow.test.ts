@@ -212,7 +212,7 @@ describe('ci.yml — the test job', () => {
 
   it('exercises every Node major package.json#engines claims to support', () => {
     // A supported-range claim that no job runs is a promise to users that
-    // nothing checks. Assert the set, not a count: adding `^26` to engines
+    // nothing checks. Assert the set, not a count: adding `^28` to engines
     // must fail here until the matrix grows to match.
     const matrix = loadWorkflow(CI_WORKFLOW).jobs?.test?.strategy?.matrix
     const versions = (matrix?.['node-version'] as unknown[] | undefined) ?? []

@@ -24,10 +24,11 @@ jobs:
       fail-fast: false
       matrix:
         # The LTS majors inside the supported range declared by
-        # package.json#engines. Each exercises a different better-sqlite3
-        # prebuild ABI (115 / 127 / 137), which is the thing that actually
-        # breaks: a single-version job cannot catch a range claim going stale.
-        node-version: [20, 22, 24]
+        # package.json#engines. better-sqlite3 13 ships a single N-API
+        # win32-x64 prebuild bundled in its tarball, so these runs guard
+        # per-major Windows behaviour (paths, spawning, NTFS semantics)
+        # rather than separate prebuild ABIs.
+        node-version: [22, 24, 26]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
