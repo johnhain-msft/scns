@@ -24,17 +24,30 @@ jobs:
       fail-fast: false
       matrix:
         # The LTS majors inside the supported range declared by
-        # package.json#engines. Each exercises a different better-sqlite3
-        # prebuild ABI (115 / 127 / 137), which is the thing that actually
-        # breaks: a single-version job cannot catch a range claim going stale.
-        node-version: [20, 22, 24]
+        # package.json#engines. better-sqlite3 13 ships a single N-API
+        # win32-x64 prebuild bundled in its tarball, so these runs guard
+        # per-major Windows behaviour (paths, spawning, NTFS semantics)
+        # rather than separate prebuild ABIs.
+        node-version: [22, 24, 26]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node-version }}
-      - name: Install (exercises win32 prebuild fetch for native deps)
-        run: npm ci
+      - name: Install (bundled N-API prebuilds; install scripts skipped)
+        # --ignore-scripts: npm 10 (bundled with Node 22/23) ignores
+        # better-sqlite3 13's `gypfile: false` and runs a synthetic
+        # `node-gyp rebuild` (WiseLibs/better-sqlite3#1516 → npm/cli#9837).
+        # The build would no-op — the prebuild ships in the tarball — but on
+        # Windows node-gyp needs Visual Studio just to configure, and it
+        # cannot detect the VS 2026 runner image. npm >= 11.20 skips
+        # unapproved install scripts by default (the Node 24/26 lanes were
+        # green precisely because of that), so this only aligns the npm 10
+        # lane with modern npm. Nothing in the tree needs install scripts on
+        # win32: better-sqlite3's prebuild is bundled, onnxruntime-node's
+        # postinstall only fetches Linux CUDA binaries, and esbuild's binary
+        # comes from its optional dependency.
+        run: npm ci --ignore-scripts
       - name: Build (exercises the cross-platform asset-copy pipeline)
         run: npm run build
       - name: Unit tests

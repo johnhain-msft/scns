@@ -60,19 +60,21 @@ export type RepoOwnership = 'owned' | 'not-owned' | 'unverifiable'
 /**
  * Node majors SCNS actually runs on.
  *
- * This is a floor AND a ceiling, and the ceiling is not cosmetic: it tracks the
- * `better-sqlite3` prebuild matrix, because a contributor without a C++
- * toolchain cannot build the native module from source. For win32-x64 the
- * `~12.9` line ships NODE_MODULE_VERSION 115 (Node 20), 127 (22), 131 (23),
- * 137 (24) and 141 (25).
+ * This is a floor AND a ceiling. The floor tracks `better-sqlite3@~13`, whose
+ * `engines` requires Node >= 22 (and Node 20 is EOL since 2026-04 anyway). The
+ * ceiling is the newest major CI exercises: since the `~13` line better-sqlite3
+ * is an N-API addon with prebuilds bundled in the npm tarball, any newer major
+ * would almost certainly *load*, but a major no CI job runs is a claim nothing
+ * checks — so it stays unlisted until the matrix grows to cover it.
  *
- * Node 21 (ABI 120) is deliberately absent: it falls *inside* 20..25 but has no
- * prebuild, which is why this is an explicit list of majors rather than a plain
- * `>=20 <26` range. The previous check was `major >= 20` — a floor with no
- * ceiling — so it passed Node 24 while the very next check failed with an ABI
- * mismatch, blessing the cause of the failure it then reported.
+ * This is an explicit list of majors rather than a `>=22 <27` range because
+ * odd-numbered non-LTS majors (and brand-new ones) join only once CI tests
+ * them. The historical bug this guards against: the check was once
+ * `major >= 20` — a floor with no ceiling — so it blessed a Node that the
+ * (then ABI-specific) native module could not run on, green-lighting the cause
+ * of the failure the very next check reported.
  */
-export const SUPPORTED_NODE_MAJORS = [20, 22, 23, 24, 25] as const
+export const SUPPORTED_NODE_MAJORS = [22, 23, 24, 25, 26] as const
 
 /**
  * The same fact as a semver range, for `package.json#engines`. Derived rather
@@ -261,8 +263,7 @@ export async function runDoctor(deps: DoctorDeps): Promise<DoctorReport> {
               ? `${deps.nodeVersion} is below the required Node ${floor}`
               : `${deps.nodeVersion} is not a supported Node major (supported: ${readableMajors})`,
           hint:
-            `SCNS runs on Node ${readableMajors} — the majors better-sqlite3 ships ` +
-            'prebuilt binaries for, and building it from source needs a C++ toolchain. ' +
+            `SCNS runs on Node ${readableMajors} — the majors its CI actually tests. ` +
             `Switch with a version manager (e.g. \`nvm use ${Math.max(...supportedMajors)}\`), ` +
             'then re-run `npm ci && npm run build`.',
         },
@@ -289,11 +290,14 @@ export async function runDoctor(deps: DoctorDeps): Promise<DoctorReport> {
   // 3. Native modules
   const native = deps.loadNativeModules()
   // An ABI mismatch describes the interpreter running `scns doctor`, not the
-  // install. SCNS pins Node 20 for better-sqlite3 while the Copilot CLI requires
-  // Node >= 24, so doctor normally runs under a different Node than the stack
-  // does, and reporting that as a FAIL told alpha testers a healthy machine was
-  // broken. `broker-reachable` is the authority on the RUNNING stack: a stack
-  // that genuinely cannot load the binary cannot serve, and fails there.
+  // install. Historically SCNS pinned one Node major for better-sqlite3 while
+  // the Copilot CLI required another, so doctor often ran under a different
+  // Node than the stack, and reporting that as a FAIL told alpha testers a
+  // healthy machine was broken. better-sqlite3 13 (N-API) makes a mismatch
+  // rare — a leftover v12-era binary is the remaining way to hit it — but the
+  // principle stands: `broker-reachable` is the authority on the RUNNING
+  // stack; a stack that genuinely cannot load the binary cannot serve, and
+  // fails there.
   const abiMismatch = !native.ok && /NODE_MODULE_VERSION/.test(native.detail)
   add(
     native.ok
