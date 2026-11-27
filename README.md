@@ -381,6 +381,15 @@ Windows 10/11, no WSL required. PowerShell throughout.
 - On a major outside that set, `npm ci` warns (`EBADENGINE`) and `node dist\cli.js
   doctor` fails fast rather than green-lighting a Node nothing has tested.
 - `package.json#engines` and `node dist\cli.js doctor` state exactly this range.
+- **One npm 10 wrinkle** (npm 10 is what Node 22 and 23 bundle): an open npm bug
+  ([npm/cli#9837](https://github.com/npm/cli/issues/9837), tracked in
+  [better-sqlite3#1516](https://github.com/WiseLibs/better-sqlite3/issues/1516)) makes
+  it ignore better-sqlite3's `gypfile: false` and run a synthetic `node-gyp rebuild`
+  during install. The build itself would do nothing — the prebuild is bundled — but on
+  Windows node-gyp demands Visual Studio just to configure. If `npm ci` fails at
+  better-sqlite3 with a node-gyp / "find VS" error, run `npm ci --ignore-scripts`
+  instead (nothing in this dependency tree needs install scripts on Windows), or
+  upgrade npm — 11.20+ skips these scripts by default.
 
 ```powershell
 node --version          # must be 22.x, 23.x, 24.x, 25.x or 26.x
@@ -660,6 +669,11 @@ Node >= 22, and SCNS claims exactly the majors its CI tests.
   else rather than green-lighting a Node nothing has tested.
 - Install with the same Node you will run SCNS with — the N-API prebuild works across
   all supported majors, but mixing install-Node and run-Node invites PATH confusion.
+- Under npm 10 (bundled with Node 22/23) on Windows, `npm ci` may fail at better-sqlite3
+  with a node-gyp / "find VS" error even though no compile is actually needed — an open
+  npm bug runs a synthetic `node-gyp rebuild` despite the bundled prebuild
+  (better-sqlite3#1516 / npm/cli#9837). Recover with `npm ci --ignore-scripts`; no
+  dependency in this tree needs install scripts on Windows.
 - **Do NOT change the system-wide/default Node version** if other tools depend on it.
   Install a supported version alongside it and invoke it by ABSOLUTE PATH for every SCNS
   command (npm ci, npm run build, and every `node dist/cli.js ...`).
